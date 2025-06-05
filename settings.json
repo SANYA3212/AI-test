@@ -1,0 +1,12 @@
+{
+  "language": "en",
+  "default_model": "",
+  "background": {
+    "type": "none",
+    "image": null,
+    "gradient": {
+      "color1": "#4166d5",
+      "color2": "#1e1f25"
+    }
+  }
+}
