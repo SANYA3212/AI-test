@@ -1,12 +1,14 @@
 {
-  "language": "en",
+  "language": "ru",
   "default_model": "",
   "background": {
-    "type": "none",
+    "type": "gradient",
     "image": null,
     "gradient": {
-      "color1": "#4166d5",
-      "color2": "#1e1f25"
+      "color1": "#000000",
+      "color2": "#770707"
     }
-  }
+  },
+  "automatic_tools": true,
+  "external_api_key": "sk-15a023b79f68454d93daba7e155d6184"
 }
