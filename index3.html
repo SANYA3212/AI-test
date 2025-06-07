@@ -1012,6 +1012,13 @@
         Settings
       </button>
     </div>
+    <div id="sidebarModelInstallProgressContainer" style="display:none; margin-top: 15px; padding: 10px; background-color: var(--card-bg); border-radius: 8px; text-align: center;">
+      <div id="sidebarProgressLabel" style="font-size: 0.9em; margin-bottom: 5px; color: var(--text-secondary);">Installing model...</div>
+      <div class="progress-container" style="height: 10px; background-color: var(--main-bg);">
+        <div id="sidebarProgressFill" class="progress-fill" style="width: 0%; height: 100%;"></div>
+      </div>
+      <div id="sidebarProgressText" style="font-size: 0.8em; color: var(--text-secondary); margin-top: 3px;">0%</div>
+    </div>
     <div class="chat-list" id="chatList"></div>
   </div>
   
@@ -1077,6 +1084,14 @@
         <label for="defaultModelSelect" id="defaultModelLabel">Default Model:</label>
         <select id="defaultModelSelect"></select>
       </div>
+
+      <div style="margin-top:15px;">
+        <label for="modelTemperatureInput" id="modelTemperatureLabel">Model Temperature:</label>
+        <div style="display: flex; align-items: center; gap: 10px; width: 90%; margin-top: 8px;">
+          <input type="range" id="modelTemperatureInput" min="0" max="2" step="0.05" style="flex-grow: 1; height: 20px;">
+          <span id="modelTemperatureValueSpan" style="min-width: 30px; text-align: right;">0.8</span>
+        </div>
+      </div>
       
       <!-- Настройки темы -->
       <div style="margin-top:20px;">
@@ -1109,27 +1124,6 @@
         <button id="applyGradientBtn" style="width:100%; margin-top:10px;">Apply Gradient</button>
       </div>
       
-      <!-- AI Tools Section -->
-      <div style="margin-top:20px; border-top: 1px solid var(--border-color); padding-top: 15px;">
-        <label id="aiToolsLabel">AI Tools:</label>
-        
-        <!-- Переключатель автоматических инструментов -->
-        <div style="margin-top: 10px; display: flex; align-items: center; justify-content: space-between;">
-          <label id="automaticToolsLabel" style="font-weight: bold;">Automatic tools / Автоматические инструменты:</label>
-          <label class="switch" style="position: relative; display: inline-block; width: 50px; height: 24px;">
-            <input type="checkbox" id="automaticToolsToggle" style="opacity: 0; width: 0; height: 0;">
-            <span class="slider" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 24px;"></span>
-          </label>
-        </div>
-        
-        <!-- Информация о файловых инструментах -->
-        <div style="margin-top: 15px; padding: 10px; background-color: var(--card-bg); border-radius: 6px; border: 1px solid var(--border-color);">
-          <div style="font-weight: bold; margin-bottom: 5px; color: var(--text-primary);" id="fileToolsTitle">🗂️ File System Access</div>
-          <div style="font-size: 12px; color: var(--text-secondary);" id="fileToolsDesc">AI can access all drives and files on your computer</div>
-        </div>
-        
-
-      </div>
       
       <button id="saveSettingsBtn">Save Settings</button>
     </div>
@@ -1153,6 +1147,9 @@
     let editingIndex = null;
     let currentTheme = "dark";
     let toolsEnabled = false;
+    let isModelInstalling = false;
+    let currentInstallingModelName = null;
+    let globalInstallPercent = 0;
 
     // --- ЭЛЕМЕНТЫ СТРАНИЦЫ ---
     const newChatBtn = document.getElementById("newChat");
@@ -1192,7 +1189,13 @@
     const gradientColor2 = document.getElementById("gradientColor2");
     const applyGradientBtn = document.getElementById("applyGradientBtn");
     const mainContent = document.getElementById("mainContent");
-    const automaticToolsToggle = document.getElementById("automaticToolsToggle");
+    const modelTemperatureInput = document.getElementById("modelTemperatureInput");
+    const modelTemperatureValueSpan = document.getElementById("modelTemperatureValueSpan");
+
+    const sidebarModelInstallProgressContainer = document.getElementById("sidebarModelInstallProgressContainer");
+    const sidebarProgressLabel = document.getElementById("sidebarProgressLabel");
+    const sidebarProgressFill = document.getElementById("sidebarProgressFill");
+    const sidebarProgressText = document.getElementById("sidebarProgressText");
 
     let imageFilesBase64 = [];
     let imageFiles = [];
@@ -1210,6 +1213,7 @@
         stop: "Stop",
         languageLabel: "Language:",
         defaultModelLabel: "Default Model:",
+        modelTemperatureLabel: "Model Temperature:",
         modelModalTitle: "Change Model",
         settingsModalTitle: "Settings",
         saveSettings: "Save Settings",
@@ -1228,11 +1232,7 @@
         introTitle: "Hi, I'm S/E Chat",
         introSubtitle: "How can I help you today😊?",
         themeLabel: "Theme:",
-        backgroundLabel: "Background:",
-        aiToolsLabel: "AI Tools:",
-        automaticToolsLabel: "Automatic tools:",
-        fileToolsTitle: "🗂️ File System Access",
-        fileToolsDesc: "AI can access all drives and files on your computer"
+        backgroundLabel: "Background:"
       },
       ru: {
         headerTitle: "S/E Чат",
@@ -1244,6 +1244,7 @@
         stop: "Остановить",
         languageLabel: "Язык:",
         defaultModelLabel: "Модель по умолчанию:",
+        modelTemperatureLabel: "Температура модели:",
         modelModalTitle: "Сменить модель",
         settingsModalTitle: "Настройки",
         saveSettings: "Сохранить настройки",
@@ -1262,11 +1263,7 @@
         introTitle: "Привет, я S/E Чат",
         introSubtitle: "Чем могу помочь😊?",
         themeLabel: "Тема:",
-        backgroundLabel: "Фон:",
-        aiToolsLabel: "ИИ Инструменты:",
-        automaticToolsLabel: "Автоматические инструменты:",
-        fileToolsTitle: "🗂️ Доступ к файловой системе",
-        fileToolsDesc: "ИИ может получить доступ ко всем дискам и файлам на вашем компьютере"
+        backgroundLabel: "Фон:"
       }
     };
 
@@ -1281,6 +1278,7 @@
       document.getElementById("settingsModalTitle").textContent = translations[lang].settingsModalTitle;
       document.getElementById("languageLabel").textContent = translations[lang].languageLabel;
       document.getElementById("defaultModelLabel").textContent = translations[lang].defaultModelLabel;
+      document.getElementById("modelTemperatureLabel").textContent = translations[lang].modelTemperatureLabel;
       saveSettingsBtn.textContent = translations[lang].saveSettings;
       document.getElementById("modelModalTitle").textContent = translations[lang].modelModalTitle;
       dragOverlay.querySelector('p').textContent = translations[lang].dropFilesHere;
@@ -1290,10 +1288,6 @@
       currentModelDisplay.textContent = translations[lang].currentModel + (currentModel || "—");
       document.getElementById("themeLabel").textContent = translations[lang].themeLabel;
       document.getElementById("backgroundLabel").textContent = translations[lang].backgroundLabel;
-      document.getElementById("aiToolsLabel").textContent = translations[lang].aiToolsLabel;
-      document.getElementById("automaticToolsLabel").textContent = translations[lang].automaticToolsLabel;
-      document.getElementById("fileToolsTitle").textContent = translations[lang].fileToolsTitle;
-      document.getElementById("fileToolsDesc").textContent = translations[lang].fileToolsDesc;
       uploadBgBtn.textContent = translations[lang].installModel;
       resetBgBtn.textContent = translations[lang].deleteBtn;
     }
@@ -1362,7 +1356,7 @@
         .replace(/>/g, "&gt;");
     }
     
-    function parseContentForCodeBlocks(content) {
+    function parseContentForCodeBlocks(content, modelNameForMessage = '') {
       content = content.replace(/<(?:think|thought)>[\s\S]*?<\/(?:think|thought)>/gi, "");
       const parts = content.split("```");
       let isCode = false;
@@ -1370,6 +1364,41 @@
       for (let i = 0; i < parts.length; i++) {
         let segment = parts[i];
         if (!isCode) {
+          // >>> НАЧАЛО КОСТЫЛЯ ДЛЯ DEEPSEEK MATHJAX
+          let isDeepseekModel = false;
+          if (modelNameForMessage && modelNameForMessage.toLowerCase().includes("deepseek")) {
+            isDeepseekModel = true;
+          }
+          // Note: The original request had a more complex way to find messageObject or use currentModel.
+          // Since modelNameForMessage is now directly passed, this simplifies.
+          // If modelNameForMessage is empty, isDeepseekModel remains false.
+
+          if (isDeepseekModel) {
+            console.log('[MathJaxDebug] Deepseek model detected, applying MathJax content fixes for [] and [[]]. Segment before fix:', segment);
+            // Костыль для одинарных квадратных скобок [formula] -> $formula$
+            // Ищет [содержимое_с_мат_символами_без_внутренних_скобок_и_долларов] НЕ ЗА КОТОРЫМ СЛЕДУЕТ '('
+            segment = segment.replace(/\[((?:[^\$\(\)\[\]]|\[(?:\^|\_|[a-zA-Z0-9]))*?[\^_a-zA-Z0-9\\](?:[^\$\(\)\[\]]|\[(?:\^|\_|[a-zA-Z0-9]))*?)\](?!\s*\()/g, (match, p1) => {
+              if (p1.includes('$')) return match;
+              if (/[\^_\{\}]|(?:\b(?:frac|sqrt|sum|int|lim|alpha|beta|gamma|delta|theta|lambda|mu|pi|sigma|omega|infty|pm|times|div|approx|neq|leq|geq|equiv|forall|exists|nabla|partial)\b)/.test(p1)) {
+                console.log(`[MathJaxDebug] Deepseek-костыль (single_bracket): [${p1}] -> $${p1}$`);
+                return `$${p1}$`;
+              }
+              return match;
+            });
+
+            // Костыль для двойных квадратных скобок [[formula]] -> $$formula$$
+            segment = segment.replace(/\[\[((?:[^\$\(\)\[\]]|\[(?:\^|\_|[a-zA-Z0-9]))*?[\^_a-zA-Z0-9\\](?:[^\$\(\)\[\]]|\[(?:\^|\_|[a-zA-Z0-9]))*?)\]\](?!\s*\()/g, (match, p1) => {
+              if (p1.includes('$')) return match;
+              if (/[\^_\{\}]|(?:\b(?:frac|sqrt|sum|int|lim|alpha|beta|gamma|delta|theta|lambda|mu|pi|sigma|omega|infty|pm|times|div|approx|neq|leq|geq|equiv|forall|exists|nabla|partial)\b)/.test(p1)) {
+                console.log(`[MathJaxDebug] Deepseek-костыль (double_bracket): [[${p1}]] -> $$${p1}$$`);
+                return `$$${p1}$$`;
+              }
+              return match;
+            });
+            console.log('[MathJaxDebug] Segment after fix:', segment);
+          }
+          // <<< КОНЕЦ КОСТЫЛЯ ДЛЯ DEEPSEEK MATHJAX
+
           let rendered = window.markdown.render(segment.trim());
           result += `<div class="chat-text">${rendered}</div>`;
         } else {
@@ -1520,7 +1549,7 @@
         if (role.toLowerCase() === "user" && m.display) {
           contentHTML = `<div class="chat-text">${escapeHtml(m.display)}</div>`;
         } else {
-          contentHTML = parseContentForCodeBlocks(m.content || "");
+          contentHTML = parseContentForCodeBlocks(m.content || "", m.modelUsed || currentModel);
         }
         if (m.images && Array.isArray(m.images)) {
           m.images.forEach((imgData) => {
@@ -1570,7 +1599,12 @@
       
       // Обновляем MathJax после изменения содержимого
       if (window.MathJax && window.MathJax.typesetPromise) {
-        window.MathJax.typesetPromise([chatContent]).catch((err) => console.log('MathJax typeset failed: ' + err.message));
+        window.MathJax.typesetPromise([chatContent])
+          .catch((err) => {
+            console.error('MathJax typeset failed:', err.message);
+          });
+      } else if (chatContent.innerText.includes('$')) { // Простое условие, чтобы не логировать постоянно
+         console.warn('MathJax or typesetPromise not available on window, but $ symbols detected.');
       }
       
       updateInputPosition();
@@ -1707,7 +1741,7 @@
       const newSettings = {
         language: languageSelect.value,
         default_model: defaultModelSelect.value,
-        automatic_tools: automaticToolsToggle.checked,
+        model_temperature: parseFloat(modelTemperatureInput.value),
         background: {
           type: localStorage.getItem('backgroundType') || 'none',
           image: localStorage.getItem('backgroundImage') || null,
@@ -1754,7 +1788,10 @@
         defaultSettings = settingsData;
         languageSelect.value = settingsData.language || "en";
         currentModel = settingsData.default_model || "";
-        await loadInstalledModelsForSettings();
+        await loadInstalledModelsForSettings(); // This ensures defaultModelSelect is populated
+        defaultModelSelect.value = settingsData.default_model || ""; // Set the value after options are loaded
+        modelTemperatureInput.value = settingsData.model_temperature !== undefined ? settingsData.model_temperature : 0.8;
+        if (modelTemperatureValueSpan) modelTemperatureValueSpan.textContent = parseFloat(modelTemperatureInput.value).toFixed(2);
         updateInterfaceLanguage(languageSelect.value);
         
         const savedTheme = localStorage.getItem('theme') || 'dark';
@@ -1777,7 +1814,9 @@
         applyBackground();
         
         // Загрузка настроек автоматических инструментов
-        automaticToolsToggle.checked = settingsData.automatic_tools || false;
+        // automaticToolsToggle.checked = settingsData.automatic_tools || false; // Удалено
+        // toolsEnabled = automaticToolsToggle.checked; // Удалено, toolsEnabled инициализируется как false глобально
+        toolsBtn.classList.toggle('active', toolsEnabled); // Убедимся, что кнопка отражает начальное состояние toolsEnabled (false)
         
       } catch (error) {
         console.error("Error loading settings:", error);
@@ -1903,19 +1942,28 @@
     }
     
     async function installModelStream(modelName) {
-      modelCustomContainer.innerHTML = "";
-      const progressContainer = document.createElement("div");
-      progressContainer.classList.add("progress-container");
-      const progressFill = document.createElement("div");
-      progressFill.classList.add("progress-fill");
-      const progressLabel = document.createElement("div");
-      progressLabel.classList.add("progress-label");
-      progressLabel.textContent = "0%";
-      progressContainer.appendChild(progressFill);
-      progressContainer.appendChild(progressLabel);
-      modelCustomContainer.appendChild(progressContainer);
-      let currentPercent = 0;
-      let currentSpeed = "";
+     isModelInstalling = true;
+     currentInstallingModelName = modelName;
+     globalInstallPercent = 0;
+
+     if (sidebarProgressLabel) sidebarProgressLabel.textContent = `Installing ${modelName}...`;
+     if (sidebarProgressFill) sidebarProgressFill.style.width = '0%';
+     if (sidebarProgressText) sidebarProgressText.textContent = '0%';
+
+     // Очистка контейнера в модальном окне и создание нового прогресс-бара там
+     modelCustomContainer.innerHTML = ''; // Очищаем предыдущий прогресс, если был
+     const progressContainerModal = document.createElement("div");
+     progressContainerModal.className = "progress-container";
+     const progressFillModal = document.createElement("div");
+     progressFillModal.className = "progress-fill";
+     const progressLabelModal = document.createElement("div");
+     progressLabelModal.className = "progress-label";
+     progressLabelModal.textContent = "0%";
+     progressContainerModal.appendChild(progressFillModal);
+     progressContainerModal.appendChild(progressLabelModal);
+     modelCustomContainer.appendChild(progressContainerModal);
+      let currentPercent = 0; // This was part of the original code, ensure it's kept if used below.
+      let currentSpeed = ""; // This was part of the original code, ensure it's kept if used below.
       try {
         const resp = await fetch("/install-model-stream", {
           method: 'POST',
@@ -1937,38 +1985,69 @@
                 const percentMatch = dataStr.match(/(\d+)%/);
                 if (percentMatch) {
                   currentPercent = parseInt(percentMatch[1], 10);
-                  progressFill.style.width = currentPercent + "%";
+                  // progressFill.style.width = currentPercent + "%"; // Old modal progress
                 }
                 const speedMatch = dataStr.match(/(\d+(?:\.\d+)?\s*(?:MB\/s|KB\/s|GB\/s))/i);
                 if (speedMatch) {
                   currentSpeed = speedMatch[1];
                 }
-                if (currentSpeed) {
-                  progressLabel.textContent = `${currentPercent}% | ${currentSpeed}`;
+
+                globalInstallPercent = currentPercent;
+                let progressDisplayText = currentSpeed ? `${currentPercent}% | ${currentSpeed}` : `${currentPercent}%`;
+
+                // Обновляем прогресс в модальном окне
+                progressFillModal.style.width = currentPercent + "%";
+                progressLabelModal.textContent = progressDisplayText;
+
+                // Обновляем прогресс на боковой панели
+                if (sidebarProgressFill) sidebarProgressFill.style.width = currentPercent + "%";
+                if (sidebarProgressText) sidebarProgressText.textContent = progressDisplayText;
+
+                // Показываем/скрываем индикатор на боковой панели в зависимости от видимости модального окна
+                if (modelModal.style.display === 'none' || !modelModal.classList.contains('show')) {
+                  if (sidebarModelInstallProgressContainer) sidebarModelInstallProgressContainer.style.display = 'block';
                 } else {
-                  progressLabel.textContent = `${currentPercent}%`;
+                  if (sidebarModelInstallProgressContainer) sidebarModelInstallProgressContainer.style.display = 'none';
                 }
+
                 if (dataStr === "DONE") {
-                  progressFill.style.width = "100%";
-                  progressLabel.textContent = currentSpeed ? `100% | ${currentSpeed}` : "100%";
+                  progressFillModal.style.width = "100%"; // Ensure modal shows 100%
+                  progressLabelModal.textContent = progressLabelModal.textContent; // Keep final text (speed might be lost here, but ok)
+
+                  if (sidebarProgressFill) sidebarProgressFill.style.width = "100%";
+                  if (sidebarProgressText) sidebarProgressText.textContent = progressLabelModal.textContent;
+
                   loadInstalledModels();
                   setTimeout(() => {
-                    progressFill.style.width = "0%";
-                    progressLabel.textContent = "0%";
-                    currentPercent = 0;
-                    currentSpeed = "";
-                  }, 1000);
+                    // No need to reset modal progress bar here as modelCustomContainer might be cleared or reused
+                    if (sidebarModelInstallProgressContainer) sidebarModelInstallProgressContainer.style.display = 'none';
+                    isModelInstalling = false;
+                    currentInstallingModelName = null;
+                    // Reset globalInstallPercent for the next run
+                    globalInstallPercent = 0;
+                  }, 2000);
                   modelModal.classList.remove('show');
                   setTimeout(() => {
                     modelModal.style.display = 'none';
-                  }, 300);
+                  }, 300); // This delay should be less than the one above to hide modal first
                 }
               }
             }
           });
         }
       } catch (error) {
-        progressLabel.textContent = "Error installing model.";
+        progressLabelModal.textContent = "Error installing model.";
+        if (sidebarProgressLabel) sidebarProgressLabel.textContent = 'Error!';
+        if (sidebarProgressText) sidebarProgressText.textContent = 'Failed';
+        if (sidebarModelInstallProgressContainer && (modelModal.style.display === 'none' || !modelModal.classList.contains('show'))) {
+           sidebarModelInstallProgressContainer.style.display = 'block'; // Показать ошибку и на сайдбаре
+        }
+        // Добавить задержку перед сбросом флагов и скрытием, чтобы пользователь увидел ошибку
+        setTimeout(() => {
+           if (sidebarModelInstallProgressContainer) sidebarModelInstallProgressContainer.style.display = 'none';
+           isModelInstalling = false;
+           currentInstallingModelName = null;
+        }, 5000);
         console.error("Error installing model:", error);
       }
     }
@@ -2007,51 +2086,37 @@
       while ((match = toolCallRegex.exec(text)) !== null) {
         const toolName = match[1];
         const paramsStr = match[2].trim();
+        console.log('[parseToolCalls] Original paramsStr:', paramsStr);
         
+        let parameters = {};
+        let attemptedJsonString = ''; // Для логирования строки, на которой произошел сбой
+
         try {
-          let parameters = {};
           if (paramsStr) {
-            // Более надежный парсинг параметров
             if (paramsStr.startsWith('{') && paramsStr.endsWith('}')) {
-              // Уже JSON формат
-              parameters = JSON.parse(paramsStr);
+              // Попытка 1: Предполагаем, что paramsStr - это уже валидный JSON объект
+              attemptedJsonString = paramsStr;
+              console.log('[parseToolCalls] Attempting direct JSON.parse on (already wrapped):', attemptedJsonString);
+              parameters = JSON.parse(attemptedJsonString);
             } else {
-              // Преобразуем формат "key: value" в валидный JSON
-              let jsonStr = paramsStr;
-              
-              // Заменяем одинарные кавычки на двойные
-              jsonStr = jsonStr.replace(/'/g, '"');
-              
-              // Добавляем кавычки вокруг ключей если их нет
-              jsonStr = jsonStr.replace(/(\w+)(\s*):/g, '"$1"$2:');
-              
-              // Добавляем кавычки вокруг значений если их нет (исключая уже заключенные в кавычки)
-              jsonStr = jsonStr.replace(/:\s*([^",{\[\s][^",}\]]*?)(?=\s*[,}]|$)/g, (match, value) => {
-                // Экранируем обратные слеши в путях Windows
-                const escapedValue = value.replace(/\\/g, '\\\\');
-                return `: "${escapedValue}"`;
-              });
-              
-              // Обрабатываем булевы значения и числа
-              jsonStr = jsonStr.replace(/:\s*"(true|false|null|\d+\.?\d*)"(?=\s*[,}]|$)/g, ': $1');
-              
-              // Добавляем фигурные скобки если их нет
-              if (!jsonStr.startsWith('{')) {
-                jsonStr = `{${jsonStr}}`;
-              }
-              
-              parameters = JSON.parse(jsonStr);
+              // Попытка 2: "Костыль" для строк вида "ключ": "значение"
+              // Экранируем все обратные слеши в paramsStr.
+              let processedParams = paramsStr.replace(/\\/g, '\\\\'); // Corrected global replace
+              console.log('[parseToolCalls] paramsStr after global slash escape (\\ -> \\\\):', processedParams);
+
+              attemptedJsonString = `{${processedParams}}`;
+              console.log('[parseToolCalls] Attempting JSON.parse on (wrapped and escaped):', attemptedJsonString);
+              parameters = JSON.parse(attemptedJsonString);
             }
           }
           calls.push({ toolName, parameters });
         } catch (e) {
-          console.error('Ошибка парсинга параметров инструмента:', e);
-          console.error('Исходная строка параметров:', paramsStr);
-          // Добавляем вызов с пустыми параметрами если парсинг не удался
+          console.error('Ошибка парсинга параметров инструмента (parseToolCalls):', e.message);
+          console.error('Исходная строка параметров (paramsStr):', paramsStr);
+          console.error('Строка, на которой произошел сбой JSON.parse:', attemptedJsonString);
           calls.push({ toolName, parameters: {} });
         }
       }
-
       return calls;
     }
 
@@ -2127,8 +2192,23 @@
           images: [],
           modelUsed: currentModel
         });
-        updateChatWindow();
-        await saveChat(chat);
+        updateChatWindow(); // Первоначальный рендер для создания блока сообщения
+        await saveChat(chat); // Сохраняем чат с пустым сообщением ассистента
+
+        const lastMessageBlock = chatContent.querySelector('.assistant-message:last-child');
+        let streamingTextContainer = null;
+        if (lastMessageBlock) {
+          streamingTextContainer = lastMessageBlock.querySelector('.chat-text');
+          if (!streamingTextContainer) { // Если .chat-text еще не создан (например, сообщение было пустое)
+            streamingTextContainer = document.createElement('div');
+            streamingTextContainer.className = 'chat-text';
+            // Нужно найти правильное место для вставки textContainer внутри lastMessageBlock
+            // Обычно это перед .message-buttons
+            const buttons = lastMessageBlock.querySelector('.message-buttons');
+            if (buttons) lastMessageBlock.insertBefore(streamingTextContainer, buttons);
+            else lastMessageBlock.appendChild(streamingTextContainer);
+          }
+        }
         // Модифицируем историю для инструментов
         let modifiedHistory = chat.history;
         if (toolsEnabled) {
@@ -2215,15 +2295,22 @@
                   const obj = JSON.parse(dataStr);
                   if (obj.message && obj.message.content) {
                     chat.history[chat.history.length - 1].content += obj.message.content;
+                     if (streamingTextContainer) {
+                       streamingTextContainer.textContent = chat.history[chat.history.length - 1].content; // Просто обновляем текст
+                     }
                   }
-                } catch {
+                 } catch { // Assuming dataStr is a plain string if JSON.parse fails
                   chat.history[chat.history.length - 1].content += dataStr;
+                   if (streamingTextContainer) {
+                     streamingTextContainer.textContent = chat.history[chat.history.length - 1].content;
+                   }
                 }
-                updateChatWindow();
               }
             }
           });
+           chatWindow.scrollTop = chatWindow.scrollHeight;
         }
+        updateChatWindow(); // Финальный рендер с Markdown и MathJax
         await saveChat(chat);
         
         // Обрабатываем вызовы инструментов, если они включены
@@ -2343,6 +2430,26 @@
     
     changeModelBtn.addEventListener('click', () => {
       loadInstalledModels();
+      if (isModelInstalling) {
+        if (sidebarModelInstallProgressContainer) sidebarModelInstallProgressContainer.style.display = 'none';
+        // Logic to potentially update progress within modal if it's for the same model
+        const customInput = document.getElementById('customInput'); // Check if custom input field exists
+        const modalProgressFill = modelCustomContainer.querySelector('.progress-fill');
+        const modalProgressLabel = modelCustomContainer.querySelector('.progress-label');
+
+        if (currentInstallingModelName && modelCustomContainer.querySelector('.progress-container')) {
+          // If an installation is ongoing and progress bar exists in modal
+          if (modalProgressFill) modalProgressFill.style.width = globalInstallPercent + '%';
+          if (modalProgressLabel) modalProgressLabel.textContent = globalInstallPercent + '%';
+          // If the model being installed was from custom input, ensure input is not shown
+          if (customInput && customInput.value === currentInstallingModelName) {
+             // customInput.style.display = 'none'; // Or remove it
+          }
+        } else if (customInput) {
+            // If there's a custom input but no progress for currentInstallingModelName, ensure it's clear
+            // customInput.value = ''; // Or handle as needed
+        }
+      }
       modelModal.style.display = 'block';
       setTimeout(() => {
         modelModal.classList.add('show');
@@ -2350,6 +2457,12 @@
     });
     
     closeModelModal.addEventListener('click', () => {
+      if (isModelInstalling) {
+        if (sidebarModelInstallProgressContainer) sidebarModelInstallProgressContainer.style.display = 'block';
+        if (sidebarProgressLabel) sidebarProgressLabel.textContent = `Installing ${currentInstallingModelName}...`;
+        if (sidebarProgressFill) sidebarProgressFill.style.width = globalInstallPercent + '%';
+        if (sidebarProgressText) sidebarProgressText.textContent = globalInstallPercent + '%';
+      }
       modelModal.classList.remove('show');
       setTimeout(() => {
         modelModal.style.display = 'none';
@@ -2377,6 +2490,12 @@
     
     window.addEventListener('click', (event) => {
       if (event.target === modelModal) {
+        if (isModelInstalling) {
+          if (sidebarModelInstallProgressContainer) sidebarModelInstallProgressContainer.style.display = 'block';
+          if (sidebarProgressLabel) sidebarProgressLabel.textContent = `Installing ${currentInstallingModelName}...`;
+          if (sidebarProgressFill) sidebarProgressFill.style.width = globalInstallPercent + '%';
+          if (sidebarProgressText) sidebarProgressText.textContent = globalInstallPercent + '%';
+        }
         modelModal.classList.remove('show');
         setTimeout(() => {
           modelModal.style.display = 'none';
@@ -2486,6 +2605,12 @@
       updateBackgroundPreview();
       applyBackground();
     });
+
+    if (modelTemperatureInput && modelTemperatureValueSpan) {
+      modelTemperatureInput.addEventListener('input', () => {
+        modelTemperatureValueSpan.textContent = parseFloat(modelTemperatureInput.value).toFixed(2);
+      });
+    }
     
     // Инициализация приложения
     async function init() {
@@ -2498,7 +2623,7 @@
       } else {
         // Если есть чаты, активируем первый
         activeChatId = chats[0].id;
-        selectChat(activeChatId);
+        switchChat(activeChatId); // <--- ИЗМЕНЕНИЕ ЗДЕСЬ
       }
       
       updateInputPosition();

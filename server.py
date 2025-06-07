@@ -26,12 +26,16 @@ if os.path.exists(SETTINGS_FILE):
     try:
         with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
             settings = json.load(f)
+        if settings.get("model_temperature") is None:
+            settings["model_temperature"] = 0.8
+            with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, indent=2, ensure_ascii=False)
     except json.decoder.JSONDecodeError:
-        settings = {"language": "en", "default_model": ""}
+        settings = {"language": "en", "default_model": "", "model_temperature": 0.8}
         with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
             json.dump(settings, f, indent=2, ensure_ascii=False)
 else:
-    settings = {"language": "en", "default_model": ""}
+    settings = {"language": "en", "default_model": "", "model_temperature": 0.8}
     with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
         json.dump(settings, f, indent=2, ensure_ascii=False)
 
@@ -115,6 +119,18 @@ def generate():
             "messages": messages,
             "stream": False
         }
+
+        options = {}
+        model_temp = settings.get("model_temperature")
+        if model_temp is not None:
+            try:
+                options["temperature"] = float(model_temp)
+            except ValueError:
+                app.logger.warning(f"Invalid temperature value in settings: {model_temp}. Using Ollama's default.")
+
+        if options:
+            payload["options"] = options
+
         resp = requests.post(f"{OLLAMA_API}/api/chat", json=payload, timeout=120)
         return jsonify(resp.json())
     except Exception as e:
@@ -175,6 +191,18 @@ def generate_stream():
             "stream": True,
             "keep_alive": "30m"
         }
+
+        options = {}
+        model_temp = settings.get("model_temperature")
+        if model_temp is not None:
+            try:
+                options["temperature"] = float(model_temp)
+            except ValueError:
+                app.logger.warning(f"Invalid temperature value in settings: {model_temp}. Using Ollama's default.")
+
+        if options:
+            payload["options"] = options
+
         resp = requests.post(f"{OLLAMA_API}/api/chat", json=payload, stream=True, timeout=120)
         def generate():
             for line in resp.iter_lines():
@@ -262,6 +290,15 @@ def settings_handler():
         try:
             new_settings = request.json
             settings.update(new_settings)
+
+            if "model_temperature" in new_settings:
+                try:
+                    settings["model_temperature"] = float(new_settings["model_temperature"])
+                except ValueError:
+                    app.logger.error(f"Invalid temperature value received: {new_settings['model_temperature']}")
+                    # Можно вернуть ошибку или использовать дефолтное значение, пока оставляем как есть,
+                    # но клиент должен валидировать ввод
+
             with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
                 json.dump(settings, f, indent=2, ensure_ascii=False)
 
@@ -286,6 +323,21 @@ def execute_tool():
         
         print(f"[DEBUG] Tool request: {tool_name} with parameters: {parameters}")
         
+        # --- Блок для обработки псевдонимов (алиасов) ---
+        if tool_name == 'launch_application':
+            print(f"[DEBUG] Alias: '{tool_name}' -> 'run_application'")
+            tool_name = 'run_application'
+        elif tool_name == 'get_cpu_info':
+            print(f"[DEBUG] Alias: '{tool_name}' -> 'get_system_info'")
+            tool_name = 'get_system_info'
+        elif tool_name == 'get_gpu_info':
+            print(f"[DEBUG] Alias: '{tool_name}' -> 'get_system_info'. Note: get_system_info does not provide detailed GPU info.")
+            tool_name = 'get_system_info'
+        elif tool_name == 'get_hardware_info':
+            print(f"[DEBUG] Alias: '{tool_name}' -> 'get_system_info'")
+            tool_name = 'get_system_info'
+        # --- Конец блока псевдонимов ---
+
         if tool_name == 'list_drives':
             """Показать все доступные диски в системе"""
             drives = []
@@ -805,8 +857,72 @@ CPU: {proc_info['cpu_percent']:.1f}%
             try:
                 if action == 'list':
                     if platform.system() == 'Windows':
-                        result = subprocess.run(['sc', 'query'], capture_output=True, text=True, timeout=30)
-                        return jsonify({'result': f'Список служб Windows:\n{result.stdout}'})
+                        # Попытка получить вывод с кодировкой cp866, стандартной для консоли Windows
+                        try:
+                            # Используем queryex для более структурированного вывода, увеличиваем bufsize
+                            # type= service чтобы получать только сервисы
+                            # state= all чтобы получать все состояния
+                            process = subprocess.run(['sc', 'queryex', 'type=', 'service', 'state=', 'all', 'bufsize=', '200000'],
+                                                     capture_output=True, timeout=60, check=False)
+                            stdout_decoded = process.stdout.decode('cp866', errors='replace')
+                            stderr_decoded = process.stderr.decode('cp866', errors='replace')
+
+                            if process.returncode != 0:
+                                return jsonify({'result': f'Ошибка выполнения sc queryex (код {process.returncode}):\n{stdout_decoded}\n{stderr_decoded}'})
+
+                            services_list = []
+                            current_service_info = {}
+
+                            for line in stdout_decoded.splitlines():
+                                line = line.strip()
+                                if not line: # Пропускаем пустые строки, которые могут быть между записями служб
+                                    if current_service_info.get("SERVICE_NAME"): # Если есть имя сервиса, значит блок закончен
+                                        services_list.append(f"Имя: {current_service_info.get('SERVICE_NAME', 'N/A')}, " +
+                                                             f"Отображаемое имя: {current_service_info.get('DISPLAY_NAME', 'N/A')}, " +
+                                                             f"Состояние: {current_service_info.get('STATE_TEXT', 'N/A')}")
+                                        current_service_info = {} # Сброс для следующей службы
+                                    continue
+
+                                if ':' in line:
+                                    key, value = line.split(":", 1)
+                                    key = key.strip()
+                                    value = value.strip()
+
+                                    if key == "SERVICE_NAME":
+                                        current_service_info["SERVICE_NAME"] = value
+                                    elif key == "DISPLAY_NAME":
+                                        current_service_info["DISPLAY_NAME"] = value
+                                    elif key == "STATE":
+                                        # Пример строки: STATE              : 4  RUNNING
+                                        state_parts = value.split()
+                                        if len(state_parts) > 1: # Ожидаем как минимум код состояния и текст
+                                            current_service_info["STATE_TEXT"] = state_parts[-1] # Берем последнее слово как текстовое состояние
+                                        else:
+                                            current_service_info["STATE_TEXT"] = value # Если формат другой
+
+                            # Добавляем последний сервис, если он есть в буфере
+                            if current_service_info.get("SERVICE_NAME"):
+                                services_list.append(f"Имя: {current_service_info.get('SERVICE_NAME', 'N/A')}, " +
+                                                     f"Отображаемое имя: {current_service_info.get('DISPLAY_NAME', 'N/A')}, " +
+                                                     f"Состояние: {current_service_info.get('STATE_TEXT', 'N/A')}")
+
+                            if not services_list:
+                                return jsonify({'result': f'Список служб Windows (sc queryex):\nНе удалось обработать вывод или службы не найдены.\nRaw stdout (first 1000 chars):\n{stdout_decoded[:1000]}'})
+
+                            # Ограничиваем вывод, например, первыми 200 службами, чтобы не перегружать
+                            output_limit = 200
+                            result_text = f'Список служб Windows ({len(services_list)} найдено, показано до {output_limit}):\n' + '\n'.join(services_list[:output_limit])
+                            if len(services_list) > output_limit:
+                                result_text += f"\n... и еще {len(services_list) - output_limit} служб."
+
+                            return jsonify({'result': result_text})
+
+                        except FileNotFoundError:
+                            return jsonify({'error': 'Команда sc не найдена. Убедитесь, что она доступна в PATH.'}), 500
+                        except subprocess.TimeoutExpired:
+                            return jsonify({'error': 'Команда sc queryex превысила лимит времени выполнения (60 сек)'}), 408
+                        except Exception as e_sc:
+                            return jsonify({'error': f'Ошибка при вызове sc queryex или обработке вывода: {str(e_sc)}'}), 500
                     else:
                         result = subprocess.run(['systemctl', 'list-units', '--type=service'], capture_output=True, text=True, timeout=30)
                         return jsonify({'result': f'Список служб Linux:\n{result.stdout}'})
@@ -927,6 +1043,43 @@ CPU: {proc_info['cpu_percent']:.1f}%
                     
             except Exception as e:
                 return jsonify({'error': f'Ошибка файловой операции: {str(e)}'}), 500
+
+        elif tool_name == 'find_executable':
+            executable_name = parameters.get('executable_name')
+            if not executable_name:
+                return jsonify({'error': 'Не указано имя исполняемого файла (executable_name)'}), 400
+
+            try:
+                if platform.system() == 'Windows':
+                    command = ['where', executable_name]
+                else:
+                    command = ['which', executable_name]
+
+                result = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False, shell=False)
+
+                stdout_decoded = result.stdout.strip()
+                stderr_decoded = result.stderr.strip()
+
+                if result.returncode == 0 and stdout_decoded:
+                    # Команда 'where' может вернуть несколько путей, 'which' обычно один
+                    found_path = stdout_decoded.splitlines()[0] # Берем первый найденный путь
+                    return jsonify({'result': f'Исполняемый файл найден: {found_path}', 'path': found_path})
+                elif stderr_decoded:
+                    # Команда where в Windows возвращает код 1 и нет вывода в stdout, если не найдено
+                    # Команда which в Linux возвращает код 1 и нет вывода в stdout, если не найдено
+                    if result.returncode != 0 and not stdout_decoded : # Типично для 'не найдено'
+                         return jsonify({'result': f'Исполняемый файл "{executable_name}" не найден в системных путях.', 'found': False})
+                    return jsonify({'result': f'Ошибка при поиске исполняемого файла: {stderr_decoded}', 'error_details': stderr_decoded, 'found': False})
+                else:
+                    return jsonify({'result': f'Исполняемый файл "{executable_name}" не найден в системных путях (код возврата: {result.returncode}).', 'found': False})
+
+            except FileNotFoundError:
+                cmd_str = 'where' if platform.system() == 'Windows' else 'which'
+                return jsonify({'error': f'Команда "{cmd_str}" не найдена. Убедитесь, что она доступна в PATH.'}), 500
+            except subprocess.TimeoutExpired:
+                return jsonify({'error': f'Команда поиска исполняемого файла превысила лимит времени выполнения (10 сек)'}), 408
+            except Exception as e_find:
+                return jsonify({'error': f'Непредвиденная ошибка при поиске исполняемого файла: {str(e_find)}'}), 500
         
         else:
             return jsonify({'error': f'Неизвестный инструмент: {tool_name}'}), 400
@@ -954,9 +1107,10 @@ if __name__ == '__main__':
     print("      - network_info: информация о сети")
     print("      - manage_services: управление службами (list/start/stop/restart/status)")
     print("      - file_operations: расширенные файловые операции (copy/move/search/permissions)")
+    print("      - find_executable: поиск исполняемого файла в системных путях")
     print("\n💡 Убедитесь, что Ollama запущен на localhost:11434")
     print("⚠️  ВНИМАНИЕ: AI имеет ПОЛНЫЙ доступ к вашему компьютеру!")
     print("🗂️  Может читать/изменять файлы, запускать программы, управлять процессами")
     print("🔒 Используйте только с доверенными AI моделями!")
     
-    app.run(host='0.0.0.0', port=12000, debug=False, threaded=True)
+    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
