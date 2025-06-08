@@ -4,6 +4,7 @@ import json
 import requests
 import subprocess
 import platform
+import re
 import signal
 import time
 import threading
@@ -211,6 +212,104 @@ def generate_stream():
         return Response(generate(), mimetype='text/event-stream')
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route('/generate-title', methods=['POST'])
+def generate_title():
+    try:
+        data = request.json
+        history = data.get('history', [])
+        model_name = data.get('model', current_model)
+
+        if not history:
+            return jsonify({'error': 'История чата пуста для генерации заголовка'}), 400
+
+        relevant_history = [m for m in history if m.get('role') != 'system'][-6:]
+        # Новый промпт без упоминания <title> тегов
+        title_prompt_text = "на основе этого текста сделай заголовок длиной от 5-7 слов без лишнего и пиши на том языке на котором я говорил в тексте не учитывая язык этого сообщения"
+
+        messages_for_title = relevant_history + [
+            {"role": "user", "content": title_prompt_text}
+        ]
+
+        payload = {
+            "model": model_name,
+            "messages": messages_for_title,
+            "stream": False,
+            "options": {"temperature": 0.5}
+        }
+        app.logger.info(f"generate_title: Sending payload to Ollama: {payload}")
+
+        resp = requests.post(f"{OLLAMA_API}/api/chat", json=payload, timeout=60)
+        resp.raise_for_status()
+        response_data = resp.json()
+        app.logger.info(f"generate_title: Received response from Ollama: {response_data}")
+
+        # 1. Удаление <think> и <thought> тегов ВМЕСТЕ С ИХ СОДЕРЖИМЫМ
+        # Сначала извлекаем сырой контент
+        generated_title = response_data.get('message', {}).get('content', '').strip()
+        app.logger.info(f"generate_title: Raw content from model: '{generated_title}'")
+
+        # Удаляем <think>...</think>
+        generated_title = re.sub(r'<think.*?>.*?</think>', '', generated_title, flags=re.IGNORECASE | re.DOTALL).strip()
+        # Удаляем <thought>...</thought> (если они отличаются или на всякий случай)
+        generated_title = re.sub(r'<thought.*?>.*?</thought>', '', generated_title, flags=re.IGNORECASE | re.DOTALL).strip()
+        app.logger.info(f"generate_title: Title after ALL think/thought tags and content removal: '{generated_title}'")
+
+        # 2. Удаляем распространенные префиксы (регистронезависимо)
+        common_llm_prefixes_patterns = [
+            r"^\s*okay,\s*here's\s*a\s*(?:short\s*)?title(?:\s*for\s*the\s*story\s*based\s*on\s*the\s*previous\s*examples)?(?:\.\s*the\s*story\s*is\s*about\s*a.*?)?:\s*",
+            r"^\s*okay,\s*the\s*user\s*wants\s*a\s*title(?:\s*for\s*a\s*story\s*based\s*on\s*the\s*previous\s*examples)?(?:\.\s*the\s*story\s*is\s*about\s*a.*?)?:\s*",
+            r"^\s*sure,\s*here's\s*a\s*title:\s*",
+            r"^\s*here's\s*a\s*(?:short\s*)?title:\s*",
+            r"^\s*here\s*is\s*a\s*(?:short\s*)?title:\s*",
+            r"^\s*(?:short\s*)?title\s*is:\s*",
+            r"^\s*title:\s*",
+            r"^\s*вот\s*(?:короткий\s*)?заголовок:\s*",
+            r"^\s*заголовок:\s*",
+            r"^\s*краткий\s*заголовок:\s*"
+        ]
+        original_title_before_prefix_strip = generated_title
+        for pattern in common_llm_prefixes_patterns:
+            new_title_candidate = re.sub(pattern, '', generated_title, count=1, flags=re.IGNORECASE).strip()
+            if new_title_candidate != generated_title:
+                app.logger.info(f"generate_title: Removed prefix matching '{pattern}' from '{generated_title}'. New title: '{new_title_candidate}'")
+                generated_title = new_title_candidate
+                break
+        if original_title_before_prefix_strip == generated_title:
+            app.logger.info(f"generate_title: No common prefixes found or removed. Title remains: '{generated_title}'")
+
+        # 3. Если есть несколько строк, берем первую непустую
+        lines = [line.strip() for line in generated_title.splitlines() if line.strip()]
+        if lines:
+            generated_title = lines[0]
+        else:
+            generated_title = "" # Если после удаления префиксов и пустых строк ничего не осталось
+        app.logger.info(f"generate_title: Title after taking first line: '{generated_title}'")
+
+        # 4. Удаляем обрамляющие кавычки (одинарные или двойные) и точку в конце
+        if len(generated_title) > 0: # Убедимся, что строка не пустая
+            if (generated_title.startswith('"') and generated_title.endswith('"')) or \
+               (generated_title.startswith("'") and generated_title.endswith("'")):
+                if len(generated_title) > 1: # Убедимся, что есть что срезать кроме кавычек
+                   generated_title = generated_title[1:-1]
+            if generated_title.endswith('.'): # Проверяем снова, так как кавычки могли быть удалены
+                generated_title = generated_title[:-1]
+        app.logger.info(f"generate_title: Title after final minimal cleanup: '{generated_title}'")
+
+        # 5. Установка дефолтного заголовка, если он пуст
+        if not generated_title: # Проверяем после всех очисток
+            generated_title = "Диалог"
+            app.logger.warning("generate_title: Title was empty after all cleaning, using default 'Диалог'.")
+
+        app.logger.info(f"generate_title: Final processed title for API response: '{generated_title}'")
+        return jsonify({'title': generated_title})
+
+    except requests.exceptions.RequestException as e_req:
+        app.logger.error(f"generate_title: Request to Ollama failed: {e_req}")
+        return jsonify({'error': f'Ошибка при запросе к Ollama: {str(e_req)}'}), 500
+    except Exception as e:
+        app.logger.error(f"generate_title: Error generating title: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/switch-model', methods=['POST'])
 def switch_model():
