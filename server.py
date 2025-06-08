@@ -311,6 +311,62 @@ def settings_handler():
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
+def get_gpu_info_os_specific():
+    gpus = []
+    try:
+        if platform.system() == "Windows":
+            import wmi # Потребуется установка 'pip install WMI'
+            c = wmi.WMI()
+            for board in c.Win32_VideoController():
+                gpus.append(board.Name)
+        elif platform.system() == "Linux":
+            try:
+                result = subprocess.run(['lspci'], capture_output=True, text=True, check=True)
+                for line in result.stdout.splitlines():
+                    if "VGA compatible controller" in line or "Display controller" in line:
+                        parts = line.split(': ')
+                        if len(parts) > 1:
+                            gpus.append(parts[1].strip())
+            except Exception as e_lspci:
+                app.logger.error(f"Failed to get GPU info from lspci: {e_lspci}")
+                gpus.append("Не удалось получить информацию о GPU (lspci)")
+        # macOS можно добавить позже, если нужно: system_profiler SPDisplaysDataType
+    except ImportError:
+        app.logger.warning("WMI module not found for GPU info on Windows. Try 'pip install WMI'.")
+        gpus.append("Не удалось получить информацию о GPU (WMI модуль не найден)")
+    except Exception as e_gpu:
+        app.logger.error(f"Error getting GPU info: {e_gpu}")
+        gpus.append("Ошибка при получении информации о GPU")
+    return gpus if gpus else ["Информация о GPU недоступна"]
+
+def get_cpu_model_name_os_specific():
+    try:
+        if platform.system() == "Windows":
+            # WMIC может быть медленным, platform.processor() часто достаточно
+            # Если platform.processor() пуст или слишком общий, можно использовать WMIC как fallback
+            # result = subprocess.run(['wmic', 'cpu', 'get', 'Name'], capture_output=True, text=True, check=True)
+            # lines = result.stdout.strip().splitlines()
+            # if len(lines) > 1: return lines[1].strip()
+            return platform.processor() # Пока оставляем platform.processor() для Windows
+        elif platform.system() == "Linux":
+            try:
+                with open('/proc/cpuinfo', 'r') as f:
+                    for line in f:
+                        if "model name" in line:
+                            return line.split(':')[1].strip()
+            except Exception:
+                pass # Если не удалось, вернем platform.processor()
+        elif platform.system() == "Darwin": # macOS
+            try:
+                result = subprocess.run(['sysctl', '-n', 'machdep.cpu.brand_string'], capture_output=True, text=True, check=True)
+                return result.stdout.strip()
+            except Exception:
+                pass
+        return platform.processor() # Fallback для всех остальных или если специфичный метод не сработал
+    except Exception as e_cpu_model:
+        app.logger.error(f"Error getting CPU model name: {e_cpu_model}")
+        return platform.processor() # Fallback
+
 # Tools API для работы с файлами
 @app.route('/api/tools', methods=['POST'])
 @app.route('/tools', methods=['POST'])
@@ -593,30 +649,64 @@ def execute_tool():
         elif tool_name == 'run_application':
             app_path = parameters.get('app_path')
             app_name = parameters.get('app_name')
-            arguments = parameters.get('arguments', '')
-            
+            arguments_str = parameters.get('arguments', '') # Переименовал во избежание путаницы с arguments_list
+
+            app.logger.info(f"run_application: app_path='{app_path}', app_name='{app_name}', arguments_str='{arguments_str}'")
+
             if not app_path and not app_name:
+                app.logger.error("run_application: Neither app_path nor app_name provided.")
                 return jsonify({'error': 'Не указан путь к приложению или имя приложения'}), 400
             
+            # Преобразуем строку аргументов в список
+            # Внимание: arguments_str.split() просто делит по пробелам.
+            # Для сложных аргументов с пробелами внутри кавычек это может работать некорректно.
+            # Модель должна либо передавать простые аргументы, либо правильно их экранировать/обрамлять кавычками.
+            arguments_list = arguments_str.split() if arguments_str else []
+            app.logger.info(f"run_application: arguments_list after split: {arguments_list}")
+
             try:
+                cmd_list = []
+                log_app_identifier = ''
+
                 if app_path:
-                    # Запуск по полному пути
-                    if platform.system() == 'Windows':
-                        subprocess.Popen([app_path] + arguments.split() if arguments else [app_path])
-                    else:
-                        subprocess.Popen([app_path] + arguments.split() if arguments else [app_path])
-                    return jsonify({'result': f'Приложение {app_path} запущено успешно'})
-                else:
-                    # Запуск по имени (поиск в PATH)
-                    if platform.system() == 'Windows':
-                        subprocess.Popen([app_name] + arguments.split() if arguments else [app_name], shell=True)
-                    else:
-                        subprocess.Popen([app_name] + arguments.split() if arguments else [app_name])
-                    return jsonify({'result': f'Приложение {app_name} запущено успешно'})
+                    log_app_identifier = app_path
+                    # Проверка пути перед использованием
+                    abs_app_path = os.path.abspath(app_path)
+                    app.logger.info(f"run_application: Using app_path. Absolute path: '{abs_app_path}'")
+                    if not os.path.exists(abs_app_path):
+                        app.logger.error(f"run_application: app_path does not exist: '{abs_app_path}'")
+                        return jsonify({'error': f'Файл приложения по указанному пути не найден: {abs_app_path}'}), 404
+                    if not os.path.isfile(abs_app_path):
+                        app.logger.error(f"run_application: app_path is not a file: '{abs_app_path}'")
+                        return jsonify({'error': f'Указанный путь к приложению не является файлом: {abs_app_path}'}), 400
+
+                    cmd_list = [abs_app_path] + arguments_list
+                    app.logger.info(f"run_application: Command list for Popen (with app_path): {cmd_list}")
+                    # Для прямого пути shell=False безопаснее и обычно не нужен
+                    subprocess.Popen(cmd_list, shell=False)
+                else: # app_name
+                    log_app_identifier = app_name
+                    cmd_list = [app_name] + arguments_list
+                    app.logger.info(f"run_application: Command list for Popen (with app_name): {cmd_list}")
+                    # Для app_name, особенно в Windows, shell=True может помочь найти программу в PATH
+                    # и обработать системные ассоциации, но менее безопасно, если app_name контролируется извне.
+                    # Однако, здесь app_name приходит от AI, которая должна быть доверенной.
+                    use_shell = True if platform.system() == 'Windows' else False
+                    app.logger.info(f"run_application: Popen with shell={use_shell}")
+                    subprocess.Popen(cmd_list, shell=use_shell)
+
+                app.logger.info(f"run_application: Successfully initiated Popen for '{log_app_identifier}'")
+                return jsonify({'result': f'Приложение {log_app_identifier} запущено успешно'})
+
             except FileNotFoundError:
-                return jsonify({'error': f'Приложение не найдено: {app_path or app_name}'}), 404
+                app.logger.error(f"run_application: FileNotFoundError for '{log_app_identifier}'. Command list: {cmd_list}")
+                return jsonify({'error': f'Приложение не найдено: {log_app_identifier}'}), 404
+            except PermissionError as e_perm:
+                app.logger.error(f"run_application: PermissionError for '{log_app_identifier}': {e_perm}. Command list: {cmd_list}")
+                return jsonify({'error': f'Ошибка прав доступа при запуске {log_app_identifier}: {str(e_perm)}'}), 403
             except Exception as e:
-                return jsonify({'error': f'Ошибка запуска приложения: {str(e)}'}), 500
+                app.logger.error(f"run_application: Generic error for '{log_app_identifier}': {e}. Command list: {cmd_list}")
+                return jsonify({'error': f'Ошибка запуска приложения {log_app_identifier}: {str(e)}'}), 500
         
         elif tool_name == 'get_system_info':
             try:
@@ -626,6 +716,8 @@ def execute_tool():
                     'os_version': platform.version(),
                     'architecture': platform.architecture()[0],
                     'processor': platform.processor(),
+                    'processor_model': get_cpu_model_name_os_specific(),
+                    'gpus': get_gpu_info_os_specific(),
                     'hostname': platform.node(),
                     'python_version': platform.python_version(),
                     'cpu_count': psutil.cpu_count(),
@@ -656,8 +748,15 @@ def execute_tool():
 ОС: {system_info['os']} {system_info['os_version']}
 Архитектура: {system_info['architecture']}
 Процессор: {system_info['processor']}
+Модель CPU: {system_info['processor_model']}
 Имя компьютера: {system_info['hostname']}
 Python: {system_info['python_version']}
+
+Видеокарты:"""
+                for gpu_name in system_info['gpus']:
+                    info_text += f"\n  - {gpu_name}"
+
+                info_text += f"""
 
 Ресурсы:
 CPU: {system_info['cpu_count']} ядер, загрузка {system_info['cpu_percent']}%
@@ -704,35 +803,80 @@ CPU: {system_info['cpu_count']} ядер, загрузка {system_info['cpu_per
                     return jsonify({'result': result_text, 'processes': processes[:20]})
                 
                 elif action == 'kill':
-                    if not process_id and not process_name:
+                    process_id_param = parameters.get('process_id')
+                    process_name_param = parameters.get('process_name')
+                    force_kill = parameters.get('force', False) # Новый параметр для принудительного kill
+
+                    app.logger.info(f"Attempting to kill process. Provided ID: {process_id_param}, Name: {process_name_param}, Force: {force_kill}")
+
+                    if not process_id_param and not process_name_param:
                         return jsonify({'error': 'Не указан ID или имя процесса для завершения'}), 400
                     
-                    killed_processes = []
-                    
-                    if process_id:
+                    killed_processes_info = []
+                    processes_to_check = []
+
+                    if process_id_param:
                         try:
-                            proc = psutil.Process(int(process_id))
-                            proc_name = proc.name()
-                            proc.terminate()
-                            killed_processes.append(f"PID {process_id} ({proc_name})")
-                        except psutil.NoSuchProcess:
-                            return jsonify({'error': f'Процесс с PID {process_id} не найден'}), 404
+                            pid = int(process_id_param)
+                            proc = psutil.Process(pid)
+                            processes_to_check.append(proc)
+                        except (psutil.NoSuchProcess, ValueError) as e_pid:
+                            app.logger.warning(f"Could not find process by ID {process_id_param}: {e_pid}")
+                            # Не возвращаем ошибку сразу, может быть найдено по имени
                         except psutil.AccessDenied:
-                            return jsonify({'error': f'Нет прав для завершения процесса PID {process_id}'}), 403
-                    
-                    if process_name:
-                        for proc in psutil.process_iter(['pid', 'name']):
+                            app.logger.warning(f"Access denied for process ID {process_id_param}")
+                            killed_processes_info.append(f"Нет прав доступа к процессу PID {process_id_param}")
+
+                    if process_name_param:
+                        for p in psutil.process_iter(['pid', 'name']):
                             try:
-                                if proc.info['name'].lower() == process_name.lower():
-                                    proc.terminate()
-                                    killed_processes.append(f"PID {proc.info['pid']} ({proc.info['name']})")
+                                if p.info['name'].lower() == process_name_param.lower():
+                                    # Избегаем дублирования, если уже добавили по ID
+                                    if not any(existing_proc.pid == p.info['pid'] for existing_proc in processes_to_check):
+                                       processes_to_check.append(psutil.Process(p.info['pid']))
                             except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                continue
+                                continue # Пропускаем процессы, к которым нет доступа или которые исчезли
                     
-                    if killed_processes:
-                        return jsonify({'result': f'Завершены процессы: {", ".join(killed_processes)}'})
+                    if not processes_to_check and not killed_processes_info: # Если ничего не нашли и не было ошибок доступа по ID
+                        return jsonify({'error': f'Процесс с ID "{process_id_param}" или именем "{process_name_param}" не найден'}), 404
+
+                    for proc_to_kill in processes_to_check:
+                        try:
+                            proc_name_actual = proc_to_kill.name()
+                            pid_actual = proc_to_kill.pid
+                            app.logger.info(f"Targeting process PID: {pid_actual}, Name: {proc_name_actual} for termination.")
+
+                            if force_kill:
+                                app.logger.info(f"Attempting force kill (proc.kill()) for PID: {pid_actual}")
+                                proc_to_kill.kill()
+                                killed_processes_info.append(f"Принудительно завершен PID {pid_actual} ({proc_name_actual})")
+                            else:
+                                app.logger.info(f"Attempting graceful termination (proc.terminate()) for PID: {pid_actual}")
+                                proc_to_kill.terminate()
+                                # Дадим процессу немного времени на завершение
+                                try:
+                                    proc_to_kill.wait(timeout=1) # Ждем 1 секунду
+                                    app.logger.info(f"Process PID: {pid_actual} terminated gracefully.")
+                                    killed_processes_info.append(f"Завершен PID {pid_actual} ({proc_name_actual})")
+                                except psutil.TimeoutExpired:
+                                    app.logger.warning(f"Process PID: {pid_actual} did not terminate gracefully within timeout. Attempting proc.kill().")
+                                    proc_to_kill.kill()
+                                    killed_processes_info.append(f"Принудительно завершен (после таймаута) PID {pid_actual} ({proc_name_actual})")
+                        except psutil.NoSuchProcess:
+                            app.logger.warning(f"Process PID: {pid_actual} no longer exists.")
+                            killed_processes_info.append(f"Процесс PID {pid_actual} уже не существует")
+                        except psutil.AccessDenied:
+                            app.logger.warning(f"Access denied when trying to terminate/kill PID: {pid_actual} ({proc_name_actual})")
+                            killed_processes_info.append(f"Нет прав для завершения PID {pid_actual} ({proc_name_actual})")
+                        except Exception as e_term:
+                            app.logger.error(f"Error terminating process PID {pid_actual} ({proc_name_actual}): {e_term}")
+                            killed_processes_info.append(f"Ошибка при завершении PID {pid_actual} ({proc_name_actual}): {str(e_term)}")
+
+                    if killed_processes_info:
+                        return jsonify({'result': ', '.join(killed_processes_info)})
                     else:
-                        return jsonify({'error': f'Процессы с именем "{process_name}" не найдены или нет прав доступа'}), 404
+                        # Эта ветка не должна достигаться, если processes_to_check не пуст, но на всякий случай
+                        return jsonify({'error': f'Не удалось найти или обработать процессы для завершения (ID: {process_id_param}, Name: {process_name_param})'}), 500
                 
                 elif action == 'info':
                     if not process_id and not process_name:
