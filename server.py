@@ -160,31 +160,67 @@ def generate_stream():
         if user_message:
             messages.append({"role": "user", "content": user_message})
         
-        # Если включены инструменты, добавляем их в системное сообщение
-        if tools_enabled:
-            system_message = {
-                "role": "system", 
-                "content": """Ты AI ассистент с доступом к системным инструментам. У тебя есть следующие инструменты:
+        # Если включены инструменты, добавляем их в системное сообщение (серверная логика, если клиент не прислал свой)
+        if tools_enabled and not any(msg['role'] == 'system' for msg in messages):
+            system_message_content = """Ты AI-ассистент с полным доступом к компьютеру пользователя.
+Это доступные инструменты. Используй их только при необходимости и только по одному за раз.
+Формат вызова: [TOOL_CALL] имя_инструмента({"параметр1": "значение1", "параметр2": "значение2"})
+Всегда используй двойные кавычки для ключей и строковых значений в JSON.
+Для путей в Windows используй двойной обратный слеш: "C:\\Users\\User\\file.txt".
 
-📁 Файловая система:
-- list_files: просмотр содержимого папок
-- read_file: чтение файлов
-- create_file: создание файлов
-- edit_file: редактирование файлов
-- delete_file: удаление файлов
-- create_directory: создание папок
+Доступные инструменты:
+📁 ФАЙЛОВАЯ СИСТЕМА:
+- list_drives: Просмотр всех дисков.
+  Параметры: нет.
+  Пример: [TOOL_CALL] list_drives({})
+- create_file: Создание/перезапись файла с содержимым.
+  Параметры: {"filename": "полный_путь_к_файлу", "content": "содержимое"}
+  Пример: [TOOL_CALL] create_file({"filename": "C:\\temp\\new.txt", "content": "Hello!"})
+- read_file: Чтение текстового файла.
+  Параметры: {"filename": "полный_путь_к_файлу"}
+  Пример: [TOOL_CALL] read_file({"filename": "C:\\boot.ini"})
+- edit_file: Редактирование существующего файла (старое содержимое заменяется новым).
+  Параметры: {"filename": "полный_путь_к_файлу", "content": "новое_содержимое"}
+- create_directory: Создание новой папки.
+  Параметры: {"dirname": "полный_путь_к_папке"}
+  Пример: [TOOL_CALL] create_directory({"dirname": "C:\\NewFolder"})
+- list_files: Просмотр содержимого папки.
+  Параметры: {"path": "путь_к_папке"} (если path не указан, используется текущий или корневой каталог)
+  Пример: [TOOL_CALL] list_files({"path": "D:\\Downloads"})
+- delete_file: Удаление файла или папки (включая содержимое папки).
+  Параметры: {"filename": "полный_путь_к_файлу_или_папке"}
+- file_operations: Расширенные файловые операции.
+  Параметры: {"operation": "copy"|"move"|"search"|"permissions", "source": "путь_источник", "destination": "путь_назначение" (для copy/move), "pattern": "шаблон" (для search)}
+  Пример (поиск): [TOOL_CALL] file_operations({"operation": "search", "source": "C:\\Users", "pattern": "*.docx"})
 
-💻 Системное управление:
-- execute_command: выполнение команд
-- get_system_info: информация о системе
-- manage_processes: управление процессами
-- network_info: информация о сети
+💻 СИСТЕМНОЕ УПРАВЛЕНИЕ:
+- execute_command: Выполнение команды в терминале (cmd/bash).
+  Параметры: {"command": "команда_с_аргументами"}
+  Пример: [TOOL_CALL] execute_command({"command": "ipconfig /all"})
+- run_application: Запуск приложения.
+  Параметры: {"app_name": "имя.exe"} (для программ из PATH) ИЛИ {"app_path": "полный_путь_к\\имя.exe"}. Можно добавить {"arguments": "аргументы"}.
+  Пример (имя): [TOOL_CALL] run_application({"app_name": "notepad.exe"})
+  Пример (путь): [TOOL_CALL] run_application({"app_path": "C:\\Program Files\\MyApp\\app.exe", "arguments": "--nogui"})
+- get_system_info: Общая информация о системе (ОС, CPU, GPU, память, диски).
+  Параметры: нет.
+  Пример: [TOOL_CALL] get_system_info({})
+- manage_processes: Управление процессами.
+  Параметры: {"action": "list"|"kill"|"info", "process_name": "имя_процесса" (для kill/info), "process_id": id_процесса (для kill/info), "force": true/false (для kill, необязательно)}
+  Пример (список): [TOOL_CALL] manage_processes({"action": "list"})
+  Пример (завершить): [TOOL_CALL] manage_processes({"action": "kill", "process_name": "notepad.exe"})
+  Пример (завершить принудительно по PID): [TOOL_CALL] manage_processes({"action": "kill", "process_id": 1234, "force": true})
+- network_info: Информация о сетевых интерфейсах и соединениях.
+  Параметры: нет.
+- manage_services: Управление службами (Windows/Linux).
+  Параметры: {"action": "list"|"start"|"stop"|"restart"|"status", "service_name": "имя_службы"}
+  Пример: [TOOL_CALL] manage_services({"action": "status", "service_name": " наиболееwuauserv"})
+- find_executable: Поиск исполняемого файла в системных путях.
+  Параметры: {"executable_name": "имя_файла.exe"}
+  Пример: [TOOL_CALL] find_executable({"executable_name": "python.exe"})
 
-Когда пользователь просит выполнить действие, используй соответствующий инструмент. Отвечай на русском языке."""
-            }
-            # Вставляем системное сообщение в начало, если его еще нет
-            if not messages or messages[0].get("role") != "system":
-                messages.insert(0, system_message)
+Отвечай на языке пользователя."""
+            system_message = {"role": "system", "content": system_message_content}
+            messages.insert(0, system_message)
         
         payload = {
             "model": model,
@@ -224,8 +260,8 @@ def generate_title():
             return jsonify({'error': 'История чата пуста для генерации заголовка'}), 400
 
         relevant_history = [m for m in history if m.get('role') != 'system'][-6:]
-        # Новый промпт без упоминания <title> тегов
-        title_prompt_text = "на основе этого текста сделай заголовок длиной от 5-7 слов без лишнего и пиши на том языке на котором я говорил в тексте не учитывая язык этого сообщения"
+        # Prompt instructs model to use <title> tags and respond in the conversation's language
+        title_prompt_text = "на основе этого текста сделай заголовок длиной от 5-7 слов без лишнего и помести заголовок в <title></title> и пиши на том языке на котором я говорил в тексте не учитывая язык этого сообщения"
 
         messages_for_title = relevant_history + [
             {"role": "user", "content": title_prompt_text}
@@ -244,62 +280,75 @@ def generate_title():
         response_data = resp.json()
         app.logger.info(f"generate_title: Received response from Ollama: {response_data}")
 
-        # 1. Удаление <think> и <thought> тегов ВМЕСТЕ С ИХ СОДЕРЖИМЫМ
-        # Сначала извлекаем сырой контент
-        generated_title = response_data.get('message', {}).get('content', '').strip()
-        app.logger.info(f"generate_title: Raw content from model: '{generated_title}'")
+        raw_content = response_data.get('message', {}).get('content', '').strip()
+        app.logger.info(f"generate_title: Raw content from model: '{raw_content}'")
 
-        # Удаляем <think>...</think>
-        generated_title = re.sub(r'<think.*?>.*?</think>', '', generated_title, flags=re.IGNORECASE | re.DOTALL).strip()
-        # Удаляем <thought>...</thought> (если они отличаются или на всякий случай)
-        generated_title = re.sub(r'<thought.*?>.*?</thought>', '', generated_title, flags=re.IGNORECASE | re.DOTALL).strip()
-        app.logger.info(f"generate_title: Title after ALL think/thought tags and content removal: '{generated_title}'")
+        generated_title = ""
+        # title_found_in_tags = False # Not strictly needed with current logic flow
 
-        # 2. Удаляем распространенные префиксы (регистронезависимо)
-        common_llm_prefixes_patterns = [
-            r"^\s*okay,\s*here's\s*a\s*(?:short\s*)?title(?:\s*for\s*the\s*story\s*based\s*on\s*the\s*previous\s*examples)?(?:\.\s*the\s*story\s*is\s*about\s*a.*?)?:\s*",
-            r"^\s*okay,\s*the\s*user\s*wants\s*a\s*title(?:\s*for\s*a\s*story\s*based\s*on\s*the\s*previous\s*examples)?(?:\.\s*the\s*story\s*is\s*about\s*a.*?)?:\s*",
-            r"^\s*sure,\s*here's\s*a\s*title:\s*",
-            r"^\s*here's\s*a\s*(?:short\s*)?title:\s*",
-            r"^\s*here\s*is\s*a\s*(?:short\s*)?title:\s*",
-            r"^\s*(?:short\s*)?title\s*is:\s*",
-            r"^\s*title:\s*",
-            r"^\s*вот\s*(?:короткий\s*)?заголовок:\s*",
-            r"^\s*заголовок:\s*",
-            r"^\s*краткий\s*заголовок:\s*"
-        ]
-        original_title_before_prefix_strip = generated_title
-        for pattern in common_llm_prefixes_patterns:
-            new_title_candidate = re.sub(pattern, '', generated_title, count=1, flags=re.IGNORECASE).strip()
-            if new_title_candidate != generated_title:
-                app.logger.info(f"generate_title: Removed prefix matching '{pattern}' from '{generated_title}'. New title: '{new_title_candidate}'")
-                generated_title = new_title_candidate
-                break
-        if original_title_before_prefix_strip == generated_title:
-            app.logger.info(f"generate_title: No common prefixes found or removed. Title remains: '{generated_title}'")
-
-        # 3. Если есть несколько строк, берем первую непустую
-        lines = [line.strip() for line in generated_title.splitlines() if line.strip()]
-        if lines:
-            generated_title = lines[0]
+        # 1. Пытаемся извлечь из <title>...</title> (регистроНЕзависимо) из СЫРОГО ответа
+        title_match = re.search(r'<title>(.*?)</title>', raw_content, re.IGNORECASE | re.DOTALL)
+        if title_match and title_match.group(1):
+            generated_title = title_match.group(1).strip()
+            # title_found_in_tags = True # Not strictly needed
+            app.logger.info(f"generate_title: Title provisionally extracted from <title> tags: '{generated_title}'")
+            # Теперь из извлеченного удаляем <think>/<thought> на случай вложенности
+            generated_title = re.sub(r'<think.*?>.*?</think>', '', generated_title, flags=re.IGNORECASE | re.DOTALL).strip()
+            generated_title = re.sub(r'<thought.*?>.*?</thought>', '', generated_title, flags=re.IGNORECASE | re.DOTALL).strip()
+            app.logger.info(f"generate_title: Title from <title> tags after think/thought removal: '{generated_title}'")
         else:
-            generated_title = "" # Если после удаления префиксов и пустых строк ничего не осталось
-        app.logger.info(f"generate_title: Title after taking first line: '{generated_title}'")
+            app.logger.warning(f"generate_title: <title> tags not found or empty in raw_content. Processing raw_content for fallback.")
+            # Если <title> не найдены, обрабатываем весь raw_content
+            # 1a. Удаление <think> и <thought> тегов ВМЕСТЕ С ИХ СОДЕРЖИМЫМ
+            generated_title = re.sub(r'<think.*?>.*?</think>', '', raw_content, flags=re.IGNORECASE | re.DOTALL).strip()
+            generated_title = re.sub(r'<thought.*?>.*?</thought>', '', generated_title, flags=re.IGNORECASE | re.DOTALL).strip()
+            app.logger.info(f"generate_title (fallback): Content after ALL think/thought tags removal: '{generated_title}'")
 
-        # 4. Удаляем обрамляющие кавычки (одинарные или двойные) и точку в конце
-        if len(generated_title) > 0: # Убедимся, что строка не пустая
+            # 1b. Удаляем распространенные префиксы (только если <title> не было)
+            common_llm_prefixes_patterns = [
+                r"^\s*okay,\s*here's\s*a\s*(?:short\s*)?title(?:\s*for\s*the\s*story\s*based\s*on\s*the\s*previous\s*examples)?(?:\.\s*the\s*story\s*is\s*about\s*a.*?)?:\s*",
+                r"^\s*okay,\s*the\s*user\s*wants\s*a\s*title(?:\s*for\s*a\s*story\s*based\s*on\s*the\s*previous\s*examples)?(?:\.\s*the\s*story\s*is\s*about\s*a.*?)?:\s*",
+                r"^\s*sure,\s*here's\s*a\s*title:\s*",
+                r"^\s*here's\s*a\s*(?:short\s*)?title:\s*",
+                r"^\s*here\s*is\s*a\s*(?:short\s*)?title:\s*",
+                r"^\s*(?:short\s*)?title\s*is:\s*",
+                r"^\s*title:\s*",
+                r"^\s*вот\s*(?:короткий\s*)?заголовок:\s*",
+                r"^\s*заголовок:\s*",
+                r"^\s*краткий\s*заголовок:\s*"
+            ]
+            original_title_before_prefix_strip = generated_title
+            for pattern in common_llm_prefixes_patterns:
+                new_title_candidate = re.sub(pattern, '', generated_title, count=1, flags=re.IGNORECASE).strip()
+                if new_title_candidate != generated_title:
+                    app.logger.info(f"generate_title (fallback): Removed prefix matching '{pattern}'. New: '{new_title_candidate}'")
+                    generated_title = new_title_candidate
+                    break
+            if original_title_before_prefix_strip == generated_title: # Check against the state before this loop
+                 app.logger.info(f"generate_title (fallback): No common LLM prefixes found or removed. Title: '{generated_title}'")
+
+            # 1c. Если есть несколько строк, берем первую непустую (только если <title> не было)
+            lines = [line.strip() for line in generated_title.splitlines() if line.strip()]
+            if lines:
+                generated_title = lines[0]
+            else:
+                generated_title = "" # Ensure it's an empty string if no non-empty lines
+            app.logger.info(f"generate_title (fallback): Title after taking first line: '{generated_title}'")
+
+        # 2. Общая финальная очистка (кавычки, точка) - применяется к generated_title в любом случае
+        if len(generated_title) > 0: # Check if string is not empty
             if (generated_title.startswith('"') and generated_title.endswith('"')) or \
                (generated_title.startswith("'") and generated_title.endswith("'")):
-                if len(generated_title) > 1: # Убедимся, что есть что срезать кроме кавычек
+                if len(generated_title) > 1: # Ensure there's something to slice besides quotes
                    generated_title = generated_title[1:-1]
-            if generated_title.endswith('.'): # Проверяем снова, так как кавычки могли быть удалены
+            if generated_title.endswith('.'): # Check again, as quotes might have been removed
                 generated_title = generated_title[:-1]
-        app.logger.info(f"generate_title: Title after final minimal cleanup: '{generated_title}'")
+        app.logger.info(f"generate_title: Title after final quote/period removal: '{generated_title}'")
 
-        # 5. Установка дефолтного заголовка, если он пуст
-        if not generated_title: # Проверяем после всех очисток
+        # 3. Установка дефолтного заголовка, если он пуст
+        if not generated_title: # Check after all processing
             generated_title = "Диалог"
-            app.logger.warning("generate_title: Title was empty after all cleaning, using default 'Диалог'.")
+            app.logger.warning("generate_title: Title is empty after all processing, using default 'Диалог'.")
 
         app.logger.info(f"generate_title: Final processed title for API response: '{generated_title}'")
         return jsonify({'title': generated_title})
