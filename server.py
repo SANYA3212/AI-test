@@ -4,6 +4,7 @@ import json
 import requests
 import subprocess
 import platform
+import re
 import signal
 import time
 import threading
@@ -26,12 +27,16 @@ if os.path.exists(SETTINGS_FILE):
     try:
         with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
             settings = json.load(f)
+        if settings.get("model_temperature") is None:
+            settings["model_temperature"] = 0.8
+            with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, indent=2, ensure_ascii=False)
     except json.decoder.JSONDecodeError:
-        settings = {"language": "en", "default_model": ""}
+        settings = {"language": "en", "default_model": "", "model_temperature": 0.8}
         with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
             json.dump(settings, f, indent=2, ensure_ascii=False)
 else:
-    settings = {"language": "en", "default_model": ""}
+    settings = {"language": "en", "default_model": "", "model_temperature": 0.8}
     with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
         json.dump(settings, f, indent=2, ensure_ascii=False)
 
@@ -115,6 +120,18 @@ def generate():
             "messages": messages,
             "stream": False
         }
+
+        options = {}
+        model_temp = settings.get("model_temperature")
+        if model_temp is not None:
+            try:
+                options["temperature"] = float(model_temp)
+            except ValueError:
+                app.logger.warning(f"Invalid temperature value in settings: {model_temp}. Using Ollama's default.")
+        
+        if options:
+            payload["options"] = options
+
         resp = requests.post(f"{OLLAMA_API}/api/chat", json=payload, timeout=120)
         return jsonify(resp.json())
     except Exception as e:
@@ -143,31 +160,67 @@ def generate_stream():
         if user_message:
             messages.append({"role": "user", "content": user_message})
         
-        # Если включены инструменты, добавляем их в системное сообщение
-        if tools_enabled:
-            system_message = {
-                "role": "system", 
-                "content": """Ты AI ассистент с доступом к системным инструментам. У тебя есть следующие инструменты:
+        # Если включены инструменты, добавляем их в системное сообщение (серверная логика, если клиент не прислал свой)
+        if tools_enabled and not any(msg['role'] == 'system' for msg in messages):
+            system_message_content = """Ты AI-ассистент с полным доступом к компьютеру пользователя.
+Это доступные инструменты. Используй их только при необходимости и только по одному за раз.
+Формат вызова: [TOOL_CALL] имя_инструмента({"параметр1": "значение1", "параметр2": "значение2"})
+Всегда используй двойные кавычки для ключей и строковых значений в JSON.
+Для путей в Windows используй двойной обратный слеш: "C:\\Users\\User\\file.txt".
 
-📁 Файловая система:
-- list_files: просмотр содержимого папок
-- read_file: чтение файлов
-- create_file: создание файлов
-- edit_file: редактирование файлов
-- delete_file: удаление файлов
-- create_directory: создание папок
+Доступные инструменты:
+📁 ФАЙЛОВАЯ СИСТЕМА:
+- list_drives: Просмотр всех дисков.
+  Параметры: нет.
+  Пример: [TOOL_CALL] list_drives({})
+- create_file: Создание/перезапись файла с содержимым.
+  Параметры: {"filename": "полный_путь_к_файлу", "content": "содержимое"}
+  Пример: [TOOL_CALL] create_file({"filename": "C:\\temp\\new.txt", "content": "Hello!"})
+- read_file: Чтение текстового файла.
+  Параметры: {"filename": "полный_путь_к_файлу"}
+  Пример: [TOOL_CALL] read_file({"filename": "C:\\boot.ini"})
+- edit_file: Редактирование существующего файла (старое содержимое заменяется новым).
+  Параметры: {"filename": "полный_путь_к_файлу", "content": "новое_содержимое"}
+- create_directory: Создание новой папки.
+  Параметры: {"dirname": "полный_путь_к_папке"}
+  Пример: [TOOL_CALL] create_directory({"dirname": "C:\\NewFolder"})
+- list_files: Просмотр содержимого папки.
+  Параметры: {"path": "путь_к_папке"} (если path не указан, используется текущий или корневой каталог)
+  Пример: [TOOL_CALL] list_files({"path": "D:\\Downloads"})
+- delete_file: Удаление файла или папки (включая содержимое папки).
+  Параметры: {"filename": "полный_путь_к_файлу_или_папке"}
+- file_operations: Расширенные файловые операции.
+  Параметры: {"operation": "copy"|"move"|"search"|"permissions", "source": "путь_источник", "destination": "путь_назначение" (для copy/move), "pattern": "шаблон" (для search)}
+  Пример (поиск): [TOOL_CALL] file_operations({"operation": "search", "source": "C:\\Users", "pattern": "*.docx"})
 
-💻 Системное управление:
-- execute_command: выполнение команд
-- get_system_info: информация о системе
-- manage_processes: управление процессами
-- network_info: информация о сети
+💻 СИСТЕМНОЕ УПРАВЛЕНИЕ:
+- execute_command: Выполнение команды в терминале (cmd/bash).
+  Параметры: {"command": "команда_с_аргументами"}
+  Пример: [TOOL_CALL] execute_command({"command": "ipconfig /all"})
+- run_application: Запуск приложения.
+  Параметры: {"app_name": "имя.exe"} (для программ из PATH) ИЛИ {"app_path": "полный_путь_к\\имя.exe"}. Можно добавить {"arguments": "аргументы"}.
+  Пример (имя): [TOOL_CALL] run_application({"app_name": "notepad.exe"})
+  Пример (путь): [TOOL_CALL] run_application({"app_path": "C:\\Program Files\\MyApp\\app.exe", "arguments": "--nogui"})
+- get_system_info: Общая информация о системе (ОС, CPU, GPU, память, диски).
+  Параметры: нет.
+  Пример: [TOOL_CALL] get_system_info({})
+- manage_processes: Управление процессами.
+  Параметры: {"action": "list"|"kill"|"info", "process_name": "имя_процесса" (для kill/info), "process_id": id_процесса (для kill/info), "force": true/false (для kill, необязательно)}
+  Пример (список): [TOOL_CALL] manage_processes({"action": "list"})
+  Пример (завершить): [TOOL_CALL] manage_processes({"action": "kill", "process_name": "notepad.exe"})
+  Пример (завершить принудительно по PID): [TOOL_CALL] manage_processes({"action": "kill", "process_id": 1234, "force": true})
+- network_info: Информация о сетевых интерфейсах и соединениях.
+  Параметры: нет.
+- manage_services: Управление службами (Windows/Linux).
+  Параметры: {"action": "list"|"start"|"stop"|"restart"|"status", "service_name": "имя_службы"}
+  Пример: [TOOL_CALL] manage_services({"action": "status", "service_name": " наиболееwuauserv"})
+- find_executable: Поиск исполняемого файла в системных путях.
+  Параметры: {"executable_name": "имя_файла.exe"}
+  Пример: [TOOL_CALL] find_executable({"executable_name": "python.exe"})
 
-Когда пользователь просит выполнить действие, используй соответствующий инструмент. Отвечай на русском языке."""
-            }
-            # Вставляем системное сообщение в начало, если его еще нет
-            if not messages or messages[0].get("role") != "system":
-                messages.insert(0, system_message)
+Отвечай на языке пользователя."""
+            system_message = {"role": "system", "content": system_message_content}
+            messages.insert(0, system_message)
         
         payload = {
             "model": model,
@@ -175,6 +228,18 @@ def generate_stream():
             "stream": True,
             "keep_alive": "30m"
         }
+
+        options = {}
+        model_temp = settings.get("model_temperature")
+        if model_temp is not None:
+            try:
+                options["temperature"] = float(model_temp)
+            except ValueError:
+                app.logger.warning(f"Invalid temperature value in settings: {model_temp}. Using Ollama's default.")
+        
+        if options:
+            payload["options"] = options
+
         resp = requests.post(f"{OLLAMA_API}/api/chat", json=payload, stream=True, timeout=120)
         def generate():
             for line in resp.iter_lines():
@@ -183,6 +248,117 @@ def generate_stream():
         return Response(generate(), mimetype='text/event-stream')
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route('/generate-title', methods=['POST'])
+def generate_title():
+    try:
+        data = request.json
+        history = data.get('history', [])
+        model_name = data.get('model', current_model)
+
+        if not history:
+            return jsonify({'error': 'История чата пуста для генерации заголовка'}), 400
+
+        relevant_history = [m for m in history if m.get('role') != 'system'][-6:]
+        # Prompt instructs model to use <title> tags and respond in the conversation's language
+        title_prompt_text = "на основе этого текста сделай заголовок длиной от 5-7 слов без лишнего и помести заголовок в <title></title> и пиши на том языке на котором я говорил в тексте не учитывая язык этого сообщения"
+        
+        messages_for_title = relevant_history + [
+            {"role": "user", "content": title_prompt_text}
+        ]
+
+        payload = {
+            "model": model_name,
+            "messages": messages_for_title,
+            "stream": False,
+            "options": {"temperature": 0.5}
+        }
+        app.logger.info(f"generate_title: Sending payload to Ollama: {payload}")
+
+        resp = requests.post(f"{OLLAMA_API}/api/chat", json=payload, timeout=60)
+        resp.raise_for_status()
+        response_data = resp.json()
+        app.logger.info(f"generate_title: Received response from Ollama: {response_data}")
+
+        raw_content = response_data.get('message', {}).get('content', '').strip()
+        app.logger.info(f"generate_title: Raw content from model: '{raw_content}'")
+
+        generated_title = ""
+        # title_found_in_tags = False # Not strictly needed with current logic flow
+
+        # 1. Пытаемся извлечь из <title>...</title> (регистроНЕзависимо) из СЫРОГО ответа
+        title_match = re.search(r'<title>(.*?)</title>', raw_content, re.IGNORECASE | re.DOTALL)
+        if title_match and title_match.group(1):
+            generated_title = title_match.group(1).strip()
+            # title_found_in_tags = True # Not strictly needed
+            app.logger.info(f"generate_title: Title provisionally extracted from <title> tags: '{generated_title}'")
+            # Теперь из извлеченного удаляем <think>/<thought> на случай вложенности
+            generated_title = re.sub(r'<think.*?>.*?</think>', '', generated_title, flags=re.IGNORECASE | re.DOTALL).strip()
+            generated_title = re.sub(r'<thought.*?>.*?</thought>', '', generated_title, flags=re.IGNORECASE | re.DOTALL).strip()
+            app.logger.info(f"generate_title: Title from <title> tags after think/thought removal: '{generated_title}'")
+        else:
+            app.logger.warning(f"generate_title: <title> tags not found or empty in raw_content. Processing raw_content for fallback.")
+            # Если <title> не найдены, обрабатываем весь raw_content
+            # 1a. Удаление <think> и <thought> тегов ВМЕСТЕ С ИХ СОДЕРЖИМЫМ
+            generated_title = re.sub(r'<think.*?>.*?</think>', '', raw_content, flags=re.IGNORECASE | re.DOTALL).strip()
+            generated_title = re.sub(r'<thought.*?>.*?</thought>', '', generated_title, flags=re.IGNORECASE | re.DOTALL).strip()
+            app.logger.info(f"generate_title (fallback): Content after ALL think/thought tags removal: '{generated_title}'")
+
+            # 1b. Удаляем распространенные префиксы (только если <title> не было)
+            common_llm_prefixes_patterns = [
+                r"^\s*okay,\s*here's\s*a\s*(?:short\s*)?title(?:\s*for\s*the\s*story\s*based\s*on\s*the\s*previous\s*examples)?(?:\.\s*the\s*story\s*is\s*about\s*a.*?)?:\s*",
+                r"^\s*okay,\s*the\s*user\s*wants\s*a\s*title(?:\s*for\s*a\s*story\s*based\s*on\s*the\s*previous\s*examples)?(?:\.\s*the\s*story\s*is\s*about\s*a.*?)?:\s*",
+                r"^\s*sure,\s*here's\s*a\s*title:\s*",
+                r"^\s*here's\s*a\s*(?:short\s*)?title:\s*",
+                r"^\s*here\s*is\s*a\s*(?:short\s*)?title:\s*",
+                r"^\s*(?:short\s*)?title\s*is:\s*",
+                r"^\s*title:\s*",
+                r"^\s*вот\s*(?:короткий\s*)?заголовок:\s*",
+                r"^\s*заголовок:\s*",
+                r"^\s*краткий\s*заголовок:\s*"
+            ]
+            original_title_before_prefix_strip = generated_title
+            for pattern in common_llm_prefixes_patterns:
+                new_title_candidate = re.sub(pattern, '', generated_title, count=1, flags=re.IGNORECASE).strip()
+                if new_title_candidate != generated_title:
+                    app.logger.info(f"generate_title (fallback): Removed prefix matching '{pattern}'. New: '{new_title_candidate}'")
+                    generated_title = new_title_candidate
+                    break
+            if original_title_before_prefix_strip == generated_title: # Check against the state before this loop
+                 app.logger.info(f"generate_title (fallback): No common LLM prefixes found or removed. Title: '{generated_title}'")
+            
+            # 1c. Если есть несколько строк, берем первую непустую (только если <title> не было)
+            lines = [line.strip() for line in generated_title.splitlines() if line.strip()]
+            if lines:
+                generated_title = lines[0]
+            else:
+                generated_title = "" # Ensure it's an empty string if no non-empty lines
+            app.logger.info(f"generate_title (fallback): Title after taking first line: '{generated_title}'")
+
+        # 2. Общая финальная очистка (кавычки, точка) - применяется к generated_title в любом случае
+        if len(generated_title) > 0: # Check if string is not empty
+            if (generated_title.startswith('"') and generated_title.endswith('"')) or \
+               (generated_title.startswith("'") and generated_title.endswith("'")):
+                if len(generated_title) > 1: # Ensure there's something to slice besides quotes
+                   generated_title = generated_title[1:-1]
+            if generated_title.endswith('.'): # Check again, as quotes might have been removed
+                generated_title = generated_title[:-1]
+        app.logger.info(f"generate_title: Title after final quote/period removal: '{generated_title}'")
+        
+        # 3. Установка дефолтного заголовка, если он пуст
+        if not generated_title: # Check after all processing
+            generated_title = "Диалог"
+            app.logger.warning("generate_title: Title is empty after all processing, using default 'Диалог'.")
+
+        app.logger.info(f"generate_title: Final processed title for API response: '{generated_title}'")
+        return jsonify({'title': generated_title})
+
+    except requests.exceptions.RequestException as e_req:
+        app.logger.error(f"generate_title: Request to Ollama failed: {e_req}")
+        return jsonify({'error': f'Ошибка при запросе к Ollama: {str(e_req)}'}), 500
+    except Exception as e:
+        app.logger.error(f"generate_title: Error generating title: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/switch-model', methods=['POST'])
 def switch_model():
@@ -262,6 +438,15 @@ def settings_handler():
         try:
             new_settings = request.json
             settings.update(new_settings)
+
+            if "model_temperature" in new_settings:
+                try:
+                    settings["model_temperature"] = float(new_settings["model_temperature"])
+                except ValueError:
+                    app.logger.error(f"Invalid temperature value received: {new_settings['model_temperature']}")
+                    # Можно вернуть ошибку или использовать дефолтное значение, пока оставляем как есть, 
+                    # но клиент должен валидировать ввод
+            
             with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
                 json.dump(settings, f, indent=2, ensure_ascii=False)
 
@@ -274,6 +459,62 @@ def settings_handler():
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
+def get_gpu_info_os_specific():
+    gpus = []
+    try:
+        if platform.system() == "Windows":
+            import wmi # Потребуется установка 'pip install WMI'
+            c = wmi.WMI()
+            for board in c.Win32_VideoController():
+                gpus.append(board.Name)
+        elif platform.system() == "Linux":
+            try:
+                result = subprocess.run(['lspci'], capture_output=True, text=True, check=True)
+                for line in result.stdout.splitlines():
+                    if "VGA compatible controller" in line or "Display controller" in line:
+                        parts = line.split(': ')
+                        if len(parts) > 1:
+                            gpus.append(parts[1].strip())
+            except Exception as e_lspci:
+                app.logger.error(f"Failed to get GPU info from lspci: {e_lspci}")
+                gpus.append("Не удалось получить информацию о GPU (lspci)")
+        # macOS можно добавить позже, если нужно: system_profiler SPDisplaysDataType
+    except ImportError:
+        app.logger.warning("WMI module not found for GPU info on Windows. Try 'pip install WMI'.")
+        gpus.append("Не удалось получить информацию о GPU (WMI модуль не найден)")
+    except Exception as e_gpu:
+        app.logger.error(f"Error getting GPU info: {e_gpu}")
+        gpus.append("Ошибка при получении информации о GPU")
+    return gpus if gpus else ["Информация о GPU недоступна"]
+
+def get_cpu_model_name_os_specific():
+    try:
+        if platform.system() == "Windows":
+            # WMIC может быть медленным, platform.processor() часто достаточно
+            # Если platform.processor() пуст или слишком общий, можно использовать WMIC как fallback
+            # result = subprocess.run(['wmic', 'cpu', 'get', 'Name'], capture_output=True, text=True, check=True)
+            # lines = result.stdout.strip().splitlines()
+            # if len(lines) > 1: return lines[1].strip()
+            return platform.processor() # Пока оставляем platform.processor() для Windows
+        elif platform.system() == "Linux":
+            try:
+                with open('/proc/cpuinfo', 'r') as f:
+                    for line in f:
+                        if "model name" in line:
+                            return line.split(':')[1].strip()
+            except Exception:
+                pass # Если не удалось, вернем platform.processor()
+        elif platform.system() == "Darwin": # macOS
+            try:
+                result = subprocess.run(['sysctl', '-n', 'machdep.cpu.brand_string'], capture_output=True, text=True, check=True)
+                return result.stdout.strip()
+            except Exception:
+                pass
+        return platform.processor() # Fallback для всех остальных или если специфичный метод не сработал
+    except Exception as e_cpu_model:
+        app.logger.error(f"Error getting CPU model name: {e_cpu_model}")
+        return platform.processor() # Fallback
+
 # Tools API для работы с файлами
 @app.route('/api/tools', methods=['POST'])
 @app.route('/tools', methods=['POST'])
@@ -285,6 +526,21 @@ def execute_tool():
         parameters = data.get('parameters', {})
         
         print(f"[DEBUG] Tool request: {tool_name} with parameters: {parameters}")
+        
+        # --- Блок для обработки псевдонимов (алиасов) ---
+        if tool_name == 'launch_application':
+            print(f"[DEBUG] Alias: '{tool_name}' -> 'run_application'")
+            tool_name = 'run_application'
+        elif tool_name == 'get_cpu_info':
+            print(f"[DEBUG] Alias: '{tool_name}' -> 'get_system_info'")
+            tool_name = 'get_system_info'
+        elif tool_name == 'get_gpu_info':
+            print(f"[DEBUG] Alias: '{tool_name}' -> 'get_system_info'. Note: get_system_info does not provide detailed GPU info.")
+            tool_name = 'get_system_info'
+        elif tool_name == 'get_hardware_info':
+            print(f"[DEBUG] Alias: '{tool_name}' -> 'get_system_info'")
+            tool_name = 'get_system_info'
+        # --- Конец блока псевдонимов ---
         
         if tool_name == 'list_drives':
             """Показать все доступные диски в системе"""
@@ -541,30 +797,64 @@ def execute_tool():
         elif tool_name == 'run_application':
             app_path = parameters.get('app_path')
             app_name = parameters.get('app_name')
-            arguments = parameters.get('arguments', '')
-            
+            arguments_str = parameters.get('arguments', '') # Переименовал во избежание путаницы с arguments_list
+
+            app.logger.info(f"run_application: app_path='{app_path}', app_name='{app_name}', arguments_str='{arguments_str}'")
+
             if not app_path and not app_name:
+                app.logger.error("run_application: Neither app_path nor app_name provided.")
                 return jsonify({'error': 'Не указан путь к приложению или имя приложения'}), 400
             
+            # Преобразуем строку аргументов в список
+            # Внимание: arguments_str.split() просто делит по пробелам.
+            # Для сложных аргументов с пробелами внутри кавычек это может работать некорректно.
+            # Модель должна либо передавать простые аргументы, либо правильно их экранировать/обрамлять кавычками.
+            arguments_list = arguments_str.split() if arguments_str else []
+            app.logger.info(f"run_application: arguments_list after split: {arguments_list}")
+
             try:
+                cmd_list = []
+                log_app_identifier = ''
+
                 if app_path:
-                    # Запуск по полному пути
-                    if platform.system() == 'Windows':
-                        subprocess.Popen([app_path] + arguments.split() if arguments else [app_path])
-                    else:
-                        subprocess.Popen([app_path] + arguments.split() if arguments else [app_path])
-                    return jsonify({'result': f'Приложение {app_path} запущено успешно'})
-                else:
-                    # Запуск по имени (поиск в PATH)
-                    if platform.system() == 'Windows':
-                        subprocess.Popen([app_name] + arguments.split() if arguments else [app_name], shell=True)
-                    else:
-                        subprocess.Popen([app_name] + arguments.split() if arguments else [app_name])
-                    return jsonify({'result': f'Приложение {app_name} запущено успешно'})
+                    log_app_identifier = app_path
+                    # Проверка пути перед использованием
+                    abs_app_path = os.path.abspath(app_path)
+                    app.logger.info(f"run_application: Using app_path. Absolute path: '{abs_app_path}'")
+                    if not os.path.exists(abs_app_path):
+                        app.logger.error(f"run_application: app_path does not exist: '{abs_app_path}'")
+                        return jsonify({'error': f'Файл приложения по указанному пути не найден: {abs_app_path}'}), 404
+                    if not os.path.isfile(abs_app_path):
+                        app.logger.error(f"run_application: app_path is not a file: '{abs_app_path}'")
+                        return jsonify({'error': f'Указанный путь к приложению не является файлом: {abs_app_path}'}), 400
+                    
+                    cmd_list = [abs_app_path] + arguments_list
+                    app.logger.info(f"run_application: Command list for Popen (with app_path): {cmd_list}")
+                    # Для прямого пути shell=False безопаснее и обычно не нужен
+                    subprocess.Popen(cmd_list, shell=False)
+                else: # app_name
+                    log_app_identifier = app_name
+                    cmd_list = [app_name] + arguments_list
+                    app.logger.info(f"run_application: Command list for Popen (with app_name): {cmd_list}")
+                    # Для app_name, особенно в Windows, shell=True может помочь найти программу в PATH
+                    # и обработать системные ассоциации, но менее безопасно, если app_name контролируется извне.
+                    # Однако, здесь app_name приходит от AI, которая должна быть доверенной.
+                    use_shell = True if platform.system() == 'Windows' else False 
+                    app.logger.info(f"run_application: Popen with shell={use_shell}")
+                    subprocess.Popen(cmd_list, shell=use_shell) 
+                    
+                app.logger.info(f"run_application: Successfully initiated Popen for '{log_app_identifier}'")
+                return jsonify({'result': f'Приложение {log_app_identifier} запущено успешно'})
+
             except FileNotFoundError:
-                return jsonify({'error': f'Приложение не найдено: {app_path or app_name}'}), 404
+                app.logger.error(f"run_application: FileNotFoundError for '{log_app_identifier}'. Command list: {cmd_list}")
+                return jsonify({'error': f'Приложение не найдено: {log_app_identifier}'}), 404
+            except PermissionError as e_perm:
+                app.logger.error(f"run_application: PermissionError for '{log_app_identifier}': {e_perm}. Command list: {cmd_list}")
+                return jsonify({'error': f'Ошибка прав доступа при запуске {log_app_identifier}: {str(e_perm)}'}), 403
             except Exception as e:
-                return jsonify({'error': f'Ошибка запуска приложения: {str(e)}'}), 500
+                app.logger.error(f"run_application: Generic error for '{log_app_identifier}': {e}. Command list: {cmd_list}")
+                return jsonify({'error': f'Ошибка запуска приложения {log_app_identifier}: {str(e)}'}), 500
         
         elif tool_name == 'get_system_info':
             try:
@@ -574,6 +864,8 @@ def execute_tool():
                     'os_version': platform.version(),
                     'architecture': platform.architecture()[0],
                     'processor': platform.processor(),
+                    'processor_model': get_cpu_model_name_os_specific(),
+                    'gpus': get_gpu_info_os_specific(),
                     'hostname': platform.node(),
                     'python_version': platform.python_version(),
                     'cpu_count': psutil.cpu_count(),
@@ -604,8 +896,15 @@ def execute_tool():
 ОС: {system_info['os']} {system_info['os_version']}
 Архитектура: {system_info['architecture']}
 Процессор: {system_info['processor']}
+Модель CPU: {system_info['processor_model']}
 Имя компьютера: {system_info['hostname']}
 Python: {system_info['python_version']}
+
+Видеокарты:"""
+                for gpu_name in system_info['gpus']:
+                    info_text += f"\n  - {gpu_name}"
+
+                info_text += f"""
 
 Ресурсы:
 CPU: {system_info['cpu_count']} ядер, загрузка {system_info['cpu_percent']}%
@@ -652,35 +951,80 @@ CPU: {system_info['cpu_count']} ядер, загрузка {system_info['cpu_per
                     return jsonify({'result': result_text, 'processes': processes[:20]})
                 
                 elif action == 'kill':
-                    if not process_id and not process_name:
+                    process_id_param = parameters.get('process_id')
+                    process_name_param = parameters.get('process_name')
+                    force_kill = parameters.get('force', False) # Новый параметр для принудительного kill
+
+                    app.logger.info(f"Attempting to kill process. Provided ID: {process_id_param}, Name: {process_name_param}, Force: {force_kill}")
+
+                    if not process_id_param and not process_name_param:
                         return jsonify({'error': 'Не указан ID или имя процесса для завершения'}), 400
                     
-                    killed_processes = []
-                    
-                    if process_id:
+                    killed_processes_info = []
+                    processes_to_check = []
+
+                    if process_id_param:
                         try:
-                            proc = psutil.Process(int(process_id))
-                            proc_name = proc.name()
-                            proc.terminate()
-                            killed_processes.append(f"PID {process_id} ({proc_name})")
-                        except psutil.NoSuchProcess:
-                            return jsonify({'error': f'Процесс с PID {process_id} не найден'}), 404
+                            pid = int(process_id_param)
+                            proc = psutil.Process(pid)
+                            processes_to_check.append(proc)
+                        except (psutil.NoSuchProcess, ValueError) as e_pid:
+                            app.logger.warning(f"Could not find process by ID {process_id_param}: {e_pid}")
+                            # Не возвращаем ошибку сразу, может быть найдено по имени
                         except psutil.AccessDenied:
-                            return jsonify({'error': f'Нет прав для завершения процесса PID {process_id}'}), 403
-                    
-                    if process_name:
-                        for proc in psutil.process_iter(['pid', 'name']):
+                            app.logger.warning(f"Access denied for process ID {process_id_param}")
+                            killed_processes_info.append(f"Нет прав доступа к процессу PID {process_id_param}")
+
+                    if process_name_param:
+                        for p in psutil.process_iter(['pid', 'name']):
                             try:
-                                if proc.info['name'].lower() == process_name.lower():
-                                    proc.terminate()
-                                    killed_processes.append(f"PID {proc.info['pid']} ({proc.info['name']})")
+                                if p.info['name'].lower() == process_name_param.lower():
+                                    # Избегаем дублирования, если уже добавили по ID
+                                    if not any(existing_proc.pid == p.info['pid'] for existing_proc in processes_to_check):
+                                       processes_to_check.append(psutil.Process(p.info['pid']))
                             except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                continue
+                                continue # Пропускаем процессы, к которым нет доступа или которые исчезли
                     
-                    if killed_processes:
-                        return jsonify({'result': f'Завершены процессы: {", ".join(killed_processes)}'})
+                    if not processes_to_check and not killed_processes_info: # Если ничего не нашли и не было ошибок доступа по ID
+                        return jsonify({'error': f'Процесс с ID "{process_id_param}" или именем "{process_name_param}" не найден'}), 404
+
+                    for proc_to_kill in processes_to_check:
+                        try:
+                            proc_name_actual = proc_to_kill.name()
+                            pid_actual = proc_to_kill.pid
+                            app.logger.info(f"Targeting process PID: {pid_actual}, Name: {proc_name_actual} for termination.")
+
+                            if force_kill:
+                                app.logger.info(f"Attempting force kill (proc.kill()) for PID: {pid_actual}")
+                                proc_to_kill.kill()
+                                killed_processes_info.append(f"Принудительно завершен PID {pid_actual} ({proc_name_actual})")
+                            else:
+                                app.logger.info(f"Attempting graceful termination (proc.terminate()) for PID: {pid_actual}")
+                                proc_to_kill.terminate()
+                                # Дадим процессу немного времени на завершение
+                                try:
+                                    proc_to_kill.wait(timeout=1) # Ждем 1 секунду
+                                    app.logger.info(f"Process PID: {pid_actual} terminated gracefully.")
+                                    killed_processes_info.append(f"Завершен PID {pid_actual} ({proc_name_actual})")
+                                except psutil.TimeoutExpired:
+                                    app.logger.warning(f"Process PID: {pid_actual} did not terminate gracefully within timeout. Attempting proc.kill().")
+                                    proc_to_kill.kill()
+                                    killed_processes_info.append(f"Принудительно завершен (после таймаута) PID {pid_actual} ({proc_name_actual})")
+                        except psutil.NoSuchProcess:
+                            app.logger.warning(f"Process PID: {pid_actual} no longer exists.")
+                            killed_processes_info.append(f"Процесс PID {pid_actual} уже не существует")
+                        except psutil.AccessDenied:
+                            app.logger.warning(f"Access denied when trying to terminate/kill PID: {pid_actual} ({proc_name_actual})")
+                            killed_processes_info.append(f"Нет прав для завершения PID {pid_actual} ({proc_name_actual})")
+                        except Exception as e_term:
+                            app.logger.error(f"Error terminating process PID {pid_actual} ({proc_name_actual}): {e_term}")
+                            killed_processes_info.append(f"Ошибка при завершении PID {pid_actual} ({proc_name_actual}): {str(e_term)}")
+
+                    if killed_processes_info:
+                        return jsonify({'result': ', '.join(killed_processes_info)})
                     else:
-                        return jsonify({'error': f'Процессы с именем "{process_name}" не найдены или нет прав доступа'}), 404
+                        # Эта ветка не должна достигаться, если processes_to_check не пуст, но на всякий случай
+                        return jsonify({'error': f'Не удалось найти или обработать процессы для завершения (ID: {process_id_param}, Name: {process_name_param})'}), 500
                 
                 elif action == 'info':
                     if not process_id and not process_name:
@@ -805,8 +1149,72 @@ CPU: {proc_info['cpu_percent']:.1f}%
             try:
                 if action == 'list':
                     if platform.system() == 'Windows':
-                        result = subprocess.run(['sc', 'query'], capture_output=True, text=True, timeout=30)
-                        return jsonify({'result': f'Список служб Windows:\n{result.stdout}'})
+                        # Попытка получить вывод с кодировкой cp866, стандартной для консоли Windows
+                        try:
+                            # Используем queryex для более структурированного вывода, увеличиваем bufsize
+                            # type= service чтобы получать только сервисы
+                            # state= all чтобы получать все состояния
+                            process = subprocess.run(['sc', 'queryex', 'type=', 'service', 'state=', 'all', 'bufsize=', '200000'], 
+                                                     capture_output=True, timeout=60, check=False) 
+                            stdout_decoded = process.stdout.decode('cp866', errors='replace')
+                            stderr_decoded = process.stderr.decode('cp866', errors='replace')
+
+                            if process.returncode != 0:
+                                return jsonify({'result': f'Ошибка выполнения sc queryex (код {process.returncode}):\n{stdout_decoded}\n{stderr_decoded}'})
+                            
+                            services_list = []
+                            current_service_info = {}
+
+                            for line in stdout_decoded.splitlines():
+                                line = line.strip()
+                                if not line: # Пропускаем пустые строки, которые могут быть между записями служб
+                                    if current_service_info.get("SERVICE_NAME"): # Если есть имя сервиса, значит блок закончен
+                                        services_list.append(f"Имя: {current_service_info.get('SERVICE_NAME', 'N/A')}, " +
+                                                             f"Отображаемое имя: {current_service_info.get('DISPLAY_NAME', 'N/A')}, " +
+                                                             f"Состояние: {current_service_info.get('STATE_TEXT', 'N/A')}")
+                                        current_service_info = {} # Сброс для следующей службы
+                                    continue
+
+                                if ':' in line:
+                                    key, value = line.split(":", 1)
+                                    key = key.strip()
+                                    value = value.strip()
+                                    
+                                    if key == "SERVICE_NAME":
+                                        current_service_info["SERVICE_NAME"] = value
+                                    elif key == "DISPLAY_NAME":
+                                        current_service_info["DISPLAY_NAME"] = value
+                                    elif key == "STATE":
+                                        # Пример строки: STATE              : 4  RUNNING 
+                                        state_parts = value.split()
+                                        if len(state_parts) > 1: # Ожидаем как минимум код состояния и текст
+                                            current_service_info["STATE_TEXT"] = state_parts[-1] # Берем последнее слово как текстовое состояние
+                                        else:
+                                            current_service_info["STATE_TEXT"] = value # Если формат другой
+                            
+                            # Добавляем последний сервис, если он есть в буфере
+                            if current_service_info.get("SERVICE_NAME"):
+                                services_list.append(f"Имя: {current_service_info.get('SERVICE_NAME', 'N/A')}, " +
+                                                     f"Отображаемое имя: {current_service_info.get('DISPLAY_NAME', 'N/A')}, " +
+                                                     f"Состояние: {current_service_info.get('STATE_TEXT', 'N/A')}")
+
+                            if not services_list:
+                                return jsonify({'result': f'Список служб Windows (sc queryex):\nНе удалось обработать вывод или службы не найдены.\nRaw stdout (first 1000 chars):\n{stdout_decoded[:1000]}'})
+
+                            # Ограничиваем вывод, например, первыми 200 службами, чтобы не перегружать
+                            output_limit = 200
+                            result_text = f'Список служб Windows ({len(services_list)} найдено, показано до {output_limit}):\n' + '\n'.join(services_list[:output_limit])
+                            if len(services_list) > output_limit:
+                                result_text += f"\n... и еще {len(services_list) - output_limit} служб."
+                            
+                            return jsonify({'result': result_text})
+
+                        except FileNotFoundError:
+                            return jsonify({'error': 'Команда sc не найдена. Убедитесь, что она доступна в PATH.'}), 500
+                        except subprocess.TimeoutExpired:
+                            return jsonify({'error': 'Команда sc queryex превысила лимит времени выполнения (60 сек)'}), 408
+                        except Exception as e_sc:
+                            return jsonify({'error': f'Ошибка при вызове sc queryex или обработке вывода: {str(e_sc)}'}), 500
                     else:
                         result = subprocess.run(['systemctl', 'list-units', '--type=service'], capture_output=True, text=True, timeout=30)
                         return jsonify({'result': f'Список служб Linux:\n{result.stdout}'})
@@ -927,6 +1335,43 @@ CPU: {proc_info['cpu_percent']:.1f}%
                     
             except Exception as e:
                 return jsonify({'error': f'Ошибка файловой операции: {str(e)}'}), 500
+
+        elif tool_name == 'find_executable':
+            executable_name = parameters.get('executable_name')
+            if not executable_name:
+                return jsonify({'error': 'Не указано имя исполняемого файла (executable_name)'}), 400
+
+            try:
+                if platform.system() == 'Windows':
+                    command = ['where', executable_name]
+                else:
+                    command = ['which', executable_name]
+                
+                result = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False, shell=False)
+                
+                stdout_decoded = result.stdout.strip()
+                stderr_decoded = result.stderr.strip()
+
+                if result.returncode == 0 and stdout_decoded:
+                    # Команда 'where' может вернуть несколько путей, 'which' обычно один
+                    found_path = stdout_decoded.splitlines()[0] # Берем первый найденный путь
+                    return jsonify({'result': f'Исполняемый файл найден: {found_path}', 'path': found_path})
+                elif stderr_decoded:
+                    # Команда where в Windows возвращает код 1 и нет вывода в stdout, если не найдено
+                    # Команда which в Linux возвращает код 1 и нет вывода в stdout, если не найдено
+                    if result.returncode != 0 and not stdout_decoded : # Типично для 'не найдено'
+                         return jsonify({'result': f'Исполняемый файл "{executable_name}" не найден в системных путях.', 'found': False})
+                    return jsonify({'result': f'Ошибка при поиске исполняемого файла: {stderr_decoded}', 'error_details': stderr_decoded, 'found': False})
+                else:
+                    return jsonify({'result': f'Исполняемый файл "{executable_name}" не найден в системных путях (код возврата: {result.returncode}).', 'found': False})
+
+            except FileNotFoundError:
+                cmd_str = 'where' if platform.system() == 'Windows' else 'which'
+                return jsonify({'error': f'Команда "{cmd_str}" не найдена. Убедитесь, что она доступна в PATH.'}), 500
+            except subprocess.TimeoutExpired:
+                return jsonify({'error': f'Команда поиска исполняемого файла превысила лимит времени выполнения (10 сек)'}), 408
+            except Exception as e_find:
+                return jsonify({'error': f'Непредвиденная ошибка при поиске исполняемого файла: {str(e_find)}'}), 500
         
         else:
             return jsonify({'error': f'Неизвестный инструмент: {tool_name}'}), 400
@@ -954,9 +1399,10 @@ if __name__ == '__main__':
     print("      - network_info: информация о сети")
     print("      - manage_services: управление службами (list/start/stop/restart/status)")
     print("      - file_operations: расширенные файловые операции (copy/move/search/permissions)")
+    print("      - find_executable: поиск исполняемого файла в системных путях")
     print("\n💡 Убедитесь, что Ollama запущен на localhost:11434")
     print("⚠️  ВНИМАНИЕ: AI имеет ПОЛНЫЙ доступ к вашему компьютеру!")
     print("🗂️  Может читать/изменять файлы, запускать программы, управлять процессами")
     print("🔒 Используйте только с доверенными AI моделями!")
     
-    app.run(host='0.0.0.0', port=12000, debug=False, threaded=True)
+    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
