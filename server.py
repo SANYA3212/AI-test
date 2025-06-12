@@ -11,6 +11,7 @@ import threading
 import psutil
 from threading import Lock
 from flask_cors import CORS
+import logging
 
 app = Flask(__name__, static_folder='.', static_url_path='')
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -51,7 +52,15 @@ if os.path.exists(LAST_MODEL_FILE):
     with open(LAST_MODEL_FILE, 'r', encoding='utf-8') as f:
         current_model = f.read().strip()
 
+log_file = 'server.log'
+file_handler = logging.FileHandler(log_file, encoding='utf-8')
 app.logger.info("Current model: %s", current_model)
+
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(formatter)
+file_handler.setLevel(logging.INFO)
+app.logger.setLevel(logging.INFO) # Ensure the app logger itself processes INFO level messages
+app.logger.addHandler(file_handler)
 
 @app.route('/')
 def index():
@@ -260,7 +269,7 @@ def generate_title():
             return jsonify({'error': 'История чата пуста для генерации заголовка'}), 400
 
         relevant_history_messages = [m for m in history if m.get('role') == 'user' or m.get('role') == 'assistant'][-10:]
-        
+
         dialog_context_parts = []
         for m in relevant_history_messages:
             role = m.get('role', 'unknown').capitalize()
