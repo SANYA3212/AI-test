@@ -259,55 +259,68 @@ def generate_title():
         if not history:
             return jsonify({'error': 'История чата пуста для генерации заголовка'}), 400
 
-        relevant_history = [m for m in history if m.get('role') != 'system'][-6:]
-        # Prompt instructs model to use <title> tags and respond in the conversation's language
-        title_prompt_text = "на основе этого текста сделай заголовок длиной от 5-7 слов без лишнего и помести заголовок в <title></title> и пиши на том языке на котором я говорил в тексте не учитывая язык этого сообщения"
+        relevant_history_messages = [m for m in history if m.get('role') == 'user' or m.get('role') == 'assistant'][-10:]
         
-        messages_for_title = relevant_history + [
-            {"role": "user", "content": title_prompt_text}
+        dialog_context_parts = []
+        for m in relevant_history_messages:
+            role = m.get('role', 'unknown').capitalize()
+            content = m.get('content', '')
+            content_preview = (content[:150] + '...') if len(content) > 150 else content
+            dialog_context_parts.append(f"{role}: {content_preview}")
+        dialog_context_for_title = "\n---\n".join(dialog_context_parts)
+
+        app.logger.warning(f"generate_title: Dialog context for title: {dialog_context_for_title}")
+
+        title_prompt_text = f'''Проанализируй следующий диалог:
+---
+{dialog_context_for_title}
+---
+Твоя задача: придумать ОЧЕНЬ краткий заголовок (от 3 до 7 слов) для этого диалога.
+Заголовок должен быть на том же языке, на котором велся диалог.
+Пожалуйста, помести заголовок ВНУТРИ тегов <title> и </title>.
+Пример: <title>Пример заголовка здесь</title>
+Не добавляй никаких своих мыслей, объяснений или комментариев вне тегов <title>. Твой ответ должен содержать ТОЛЬКО теги <title> и заголовок внутри них.
+'''
+
+        messages_for_title = [
+            {"role": "user", "content": title_prompt_text.strip()}
         ]
+        app.logger.warning(f"generate_title: Final prompt for title (single message to LLM): {messages_for_title[0]['content']}")
 
         payload = {
             "model": model_name,
             "messages": messages_for_title,
             "stream": False,
-            "options": {"temperature": 0.5}
+            "options": {"temperature": 0.4} # Slightly lower temp for more deterministic titles
         }
-        app.logger.info(f"generate_title: Sending payload to Ollama: {payload}")
+        app.logger.warning(f"generate_title: Sending payload to Ollama: {json.dumps(payload, ensure_ascii=False, indent=2)}")
 
         resp = requests.post(f"{OLLAMA_API}/api/chat", json=payload, timeout=60)
         resp.raise_for_status()
         response_data = resp.json()
-        app.logger.info(f"generate_title: Received response from Ollama: {response_data}")
+        app.logger.warning(f"generate_title: Received response from Ollama: {response_data}")
 
         raw_content = response_data.get('message', {}).get('content', '').strip()
-        app.logger.info(f"generate_title: Raw content from model: '{raw_content}'")
+        app.logger.warning(f"generate_title: Raw content from model: '{raw_content}'")
 
         generated_title = ""
-        # title_found_in_tags = False # Not strictly needed with current logic flow
 
-        # 1. Пытаемся извлечь из <title>...</title> (регистроНЕзависимо) из СЫРОГО ответа
-        title_match = re.search(r'<title>(.*?)</title>', raw_content, re.IGNORECASE | re.DOTALL)
-        if title_match and title_match.group(1):
+        content_cleaned_from_thoughts = re.sub(r'<think[^>]*>[\s\S]*?<\/think>', '', raw_content, flags=re.IGNORECASE | re.DOTALL).strip()
+        content_cleaned_from_thoughts = re.sub(r'<thought[^>]*>[\s\S]*?<\/thought>', '', content_cleaned_from_thoughts, flags=re.IGNORECASE | re.DOTALL).strip()
+        app.logger.warning(f"generate_title: Content after ALL think/thought tags removal: '{content_cleaned_from_thoughts}'")
+
+        title_match = re.search(r'<title>(.*?)</title>', content_cleaned_from_thoughts, re.IGNORECASE | re.DOTALL)
+
+        if title_match and title_match.group(1).strip():
             generated_title = title_match.group(1).strip()
-            # title_found_in_tags = True # Not strictly needed
-            app.logger.info(f"generate_title: Title provisionally extracted from <title> tags: '{generated_title}'")
-            # Теперь из извлеченного удаляем <think>/<thought> на случай вложенности
-            generated_title = re.sub(r'<think.*?>.*?</think>', '', generated_title, flags=re.IGNORECASE | re.DOTALL).strip()
-            generated_title = re.sub(r'<thought.*?>.*?</thought>', '', generated_title, flags=re.IGNORECASE | re.DOTALL).strip()
-            app.logger.info(f"generate_title: Title from <title> tags after think/thought removal: '{generated_title}'")
+            app.logger.warning(f"generate_title: Title extracted from <title> tags (after pre-cleaning thoughts): '{generated_title}'")
         else:
-            app.logger.warning(f"generate_title: <title> tags not found or empty in raw_content. Processing raw_content for fallback.")
-            # Если <title> не найдены, обрабатываем весь raw_content
-            # 1a. Удаление <think> и <thought> тегов ВМЕСТЕ С ИХ СОДЕРЖИМЫМ
-            generated_title = re.sub(r'<think.*?>.*?</think>', '', raw_content, flags=re.IGNORECASE | re.DOTALL).strip()
-            generated_title = re.sub(r'<thought.*?>.*?</thought>', '', generated_title, flags=re.IGNORECASE | re.DOTALL).strip()
-            app.logger.info(f"generate_title (fallback): Content after ALL think/thought tags removal: '{generated_title}'")
+            app.logger.warning(f"generate_title: <title> tags not found or empty in thought-cleaned content. Using this cleaned content for fallback: '{content_cleaned_from_thoughts}'")
+            temp_title = content_cleaned_from_thoughts
 
-            # 1b. Удаляем распространенные префиксы (только если <title> не было)
             common_llm_prefixes_patterns = [
-                r"^\s*okay,\s*here's\s*a\s*(?:short\s*)?title(?:\s*for\s*the\s*story\s*based\s*on\s*the\s*previous\s*examples)?(?:\.\s*the\s*story\s*is\s*about\s*a.*?)?:\s*",
-                r"^\s*okay,\s*the\s*user\s*wants\s*a\s*title(?:\s*for\s*a\s*story\s*based\s*on\s*the\s*previous\s*examples)?(?:\.\s*the\s*story\s*is\s*about\s*a.*?)?:\s*",
+                r"^\s*okay,\s*here's\s*a\s*(?:short\s*)?title(?:.*?)?:\s*",
+                r"^\s*okay,\s*the\s*user\s*wants\s*a\s*title(?:.*?)?:\s*",
                 r"^\s*sure,\s*here's\s*a\s*title:\s*",
                 r"^\s*here's\s*a\s*(?:short\s*)?title:\s*",
                 r"^\s*here\s*is\s*a\s*(?:short\s*)?title:\s*",
@@ -317,47 +330,44 @@ def generate_title():
                 r"^\s*заголовок:\s*",
                 r"^\s*краткий\s*заголовок:\s*"
             ]
-            original_title_before_prefix_strip = generated_title
+            original_title_before_prefix_strip = temp_title
             for pattern in common_llm_prefixes_patterns:
-                new_title_candidate = re.sub(pattern, '', generated_title, count=1, flags=re.IGNORECASE).strip()
-                if new_title_candidate != generated_title:
-                    app.logger.info(f"generate_title (fallback): Removed prefix matching '{pattern}'. New: '{new_title_candidate}'")
-                    generated_title = new_title_candidate
+                new_title_candidate = re.sub(pattern, '', temp_title, count=1, flags=re.IGNORECASE).strip()
+                if new_title_candidate != temp_title:
+                    app.logger.warning(f"generate_title (fallback): Removed prefix matching '{pattern}'. New: '{new_title_candidate}'")
+                    temp_title = new_title_candidate
                     break
-            if original_title_before_prefix_strip == generated_title: # Check against the state before this loop
-                 app.logger.info(f"generate_title (fallback): No common LLM prefixes found or removed. Title: '{generated_title}'")
+            if original_title_before_prefix_strip == temp_title:
+                 app.logger.warning(f"generate_title (fallback): No common LLM prefixes found or removed. Title remains: '{temp_title}'")
             
-            # 1c. Если есть несколько строк, берем первую непустую (только если <title> не было)
-            lines = [line.strip() for line in generated_title.splitlines() if line.strip()]
+            lines = [line.strip() for line in temp_title.splitlines() if line.strip()]
             if lines:
                 generated_title = lines[0]
             else:
-                generated_title = "" # Ensure it's an empty string if no non-empty lines
-            app.logger.info(f"generate_title (fallback): Title after taking first line: '{generated_title}'")
+                generated_title = ""
+            app.logger.warning(f"generate_title (fallback): Title after taking first line: '{generated_title}'")
 
-        # 2. Общая финальная очистка (кавычки, точка) - применяется к generated_title в любом случае
-        if len(generated_title) > 0: # Check if string is not empty
+        if generated_title:
             if (generated_title.startswith('"') and generated_title.endswith('"')) or \
                (generated_title.startswith("'") and generated_title.endswith("'")):
-                if len(generated_title) > 1: # Ensure there's something to slice besides quotes
+                if len(generated_title) > 1:
                    generated_title = generated_title[1:-1]
-            if generated_title.endswith('.'): # Check again, as quotes might have been removed
+            if generated_title.endswith('.'):
                 generated_title = generated_title[:-1]
-        app.logger.info(f"generate_title: Title after final quote/period removal: '{generated_title}'")
+        app.logger.warning(f"generate_title: Title after final quote/period removal: '{generated_title}'")
         
-        # 3. Установка дефолтного заголовка, если он пуст
-        if not generated_title: # Check after all processing
+        if not generated_title:
             generated_title = "Диалог"
             app.logger.warning("generate_title: Title is empty after all processing, using default 'Диалог'.")
 
-        app.logger.info(f"generate_title: Final processed title for API response: '{generated_title}'")
+        app.logger.warning(f"generate_title: Final processed title for API response: '{generated_title}'")
         return jsonify({'title': generated_title})
 
     except requests.exceptions.RequestException as e_req:
-        app.logger.error(f"generate_title: Request to Ollama failed: {e_req}")
+        app.logger.error(f"generate_title: Request to Ollama failed: {e_req}", exc_info=True)
         return jsonify({'error': f'Ошибка при запросе к Ollama: {str(e_req)}'}), 500
     except Exception as e:
-        app.logger.error(f"generate_title: Error generating title: {e}")
+        app.logger.error(f"generate_title: Error generating title: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 @app.route('/switch-model', methods=['POST'])
