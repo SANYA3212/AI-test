@@ -1089,6 +1089,8 @@
   }
 }
   </style>
+  <link rel="stylesheet" id="highlight-light-theme" href="js/highlightjs/default-light.min.css" media="all" disabled>
+  <link rel="stylesheet" id="highlight-dark-theme" href="js/highlightjs/default-dark.min.css" media="all" disabled>
   
   <!-- MathJax Configuration -->
   <script>
@@ -1245,6 +1247,8 @@
     </div>
   </div>
   
+  <script src="js/highlightjs/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
   <script>
     var markdown = window.markdownit({
       html: false,
@@ -1268,6 +1272,25 @@
     let currentInstallingModelName = null;
     let globalInstallPercent = 0;
     let isGeneratingTitle = false;
+
+    // --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
+    function applyHighlightTheme(theme) {
+      const lightThemeLink = document.getElementById('highlight-light-theme');
+      const darkThemeLink = document.getElementById('highlight-dark-theme');
+
+      if (!lightThemeLink || !darkThemeLink) {
+        console.error('Highlight.js theme link elements not found!');
+        return;
+      }
+
+      if (theme === 'light') {
+        lightThemeLink.removeAttribute('disabled');
+        darkThemeLink.setAttribute('disabled', 'disabled');
+      } else { // Default to dark theme
+        darkThemeLink.removeAttribute('disabled');
+        lightThemeLink.setAttribute('disabled', 'disabled');
+      }
+    }
 
     // --- ЭЛЕМЕНТЫ СТРАНИЦЫ ---
     const newChatBtn = document.getElementById("newChat");
@@ -1730,6 +1753,11 @@
       } else if (chatContent.innerText.includes('$')) { // Простое условие, чтобы не логировать постоянно
          console.warn('MathJax or typesetPromise not available on window, but $ symbols detected.');
       }
+
+    // Add this for highlight.js
+    if (window.hljs) {
+      hljs.highlightAll();
+    }
       
       updateInputPosition();
     }
@@ -1920,7 +1948,8 @@
         
         const savedTheme = localStorage.getItem('theme') || 'dark';
         document.body.setAttribute('data-theme', savedTheme);
-        currentTheme = savedTheme;
+        currentTheme = savedTheme; // Ensure currentTheme is updated
+        applyHighlightTheme(currentTheme);
         
         // Загрузка фона из настроек
         if (settingsData.background) {
@@ -2779,7 +2808,8 @@ async function sendMessage() {
         const theme = option.getAttribute('data-theme');
         document.body.setAttribute('data-theme', theme);
         localStorage.setItem('theme', theme);
-        currentTheme = theme;
+        currentTheme = theme; // Ensure currentTheme is updated
+        applyHighlightTheme(currentTheme);
         
         document.querySelectorAll('.theme-option').forEach(opt => {
           opt.classList.remove('active');
