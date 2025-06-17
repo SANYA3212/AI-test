@@ -1,0 +1,180 @@
+2025-06-12 17:35:52,939 - INFO - run_application: app_path='None', app_name='notepad.exe', arguments_str=''
+2025-06-12 17:35:52,940 - INFO - run_application: arguments_list after split: []
+2025-06-12 17:35:52,940 - INFO - run_application: Command list for Popen (with app_name): ['notepad.exe']
+2025-06-12 17:35:52,940 - INFO - run_application: Popen with shell=True
+2025-06-12 17:35:52,948 - INFO - run_application: Successfully initiated Popen for 'notepad.exe'
+2025-06-12 17:36:28,698 - WARNING - generate_title: Dialog context for title: User: привет
+---
+Assistant: <think>
+
+</think>
+
+Привет! Как я могу помочь тебе сегодня?
+---
+User: меня зовут SANYA
+---
+Assistant: <think>
+Alright, the user greeted me with "privet" which is Russian for "hello." I responded in kind and asked how I can help.
+
+Now they say "меня зов...
+---
+User: проверь свои инструменты
+---
+Assistant: <think>
+Okay, so the user said "проверь свои инструменты", which translates to "check your tools." Hmm, they must want me to verify if all my availabl...
+---
+User: что не работает
+2025-06-12 17:36:28,699 - WARNING - generate_title: Final prompt for title (single message to LLM): Проанализируй следующий диалог:
+---
+User: привет
+---
+Assistant: <think>
+
+</think>
+
+Привет! Как я могу помочь тебе сегодня?
+---
+User: меня зовут SANYA
+---
+Assistant: <think>
+Alright, the user greeted me with "privet" which is Russian for "hello." I responded in kind and asked how I can help.
+
+Now they say "меня зов...
+---
+User: проверь свои инструменты
+---
+Assistant: <think>
+Okay, so the user said "проверь свои инструменты", which translates to "check your tools." Hmm, they must want me to verify if all my availabl...
+---
+User: что не работает
+---
+Твоя задача: придумать ОЧЕНЬ краткий заголовок (от 3 до 7 слов) для этого диалога.
+Заголовок должен быть на том же языке, на котором велся диалог.
+Пожалуйста, помести заголовок ВНУТРИ тегов <title> и </title>.
+Пример: <title>Пример заголовка здесь</title>
+Не добавляй никаких своих мыслей, объяснений или комментариев вне тегов <title>. Твой ответ должен содержать ТОЛЬКО теги <title> и заголовок внутри них.
+2025-06-12 17:36:28,701 - WARNING - generate_title: Sending payload to Ollama: {
+  "model": "deepseek-r1:14b",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Проанализируй следующий диалог:\n---\nUser: привет\n---\nAssistant: <think>\n\n</think>\n\nПривет! Как я могу помочь тебе сегодня?\n---\nUser: меня зовут SANYA\n---\nAssistant: <think>\nAlright, the user greeted me with \"privet\" which is Russian for \"hello.\" I responded in kind and asked how I can help.\n\nNow they say \"меня зов...\n---\nUser: проверь свои инструменты\n---\nAssistant: <think>\nOkay, so the user said \"проверь свои инструменты\", which translates to \"check your tools.\" Hmm, they must want me to verify if all my availabl...\n---\nUser: что не работает\n---\nТвоя задача: придумать ОЧЕНЬ краткий заголовок (от 3 до 7 слов) для этого диалога.\nЗаголовок должен быть на том же языке, на котором велся диалог.\nПожалуйста, помести заголовок ВНУТРИ тегов <title> и </title>.\nПример: <title>Пример заголовка здесь</title>\nНе добавляй никаких своих мыслей, объяснений или комментариев вне тегов <title>. Твой ответ должен содержать ТОЛЬКО теги <title> и заголовок внутри них."
+    }
+  ],
+  "stream": false,
+  "options": {
+    "temperature": 0.4
+  }
+}
+2025-06-12 17:36:34,353 - WARNING - generate_title: Received response from Ollama: {'model': 'deepseek-r1:14b', 'created_at': '2025-06-12T11:36:34.3523961Z', 'message': {'role': 'assistant', 'content': '<think>\nAlright, let\'s break this down. The user wants a very short title for the dialogue they provided. The conversation is in Russian, so the title should also be in Russian.\n\nLooking at the dialogue:\n- User says "privet" (hello).\n- Assistant responds and asks how to help.\n- User says their name is SANYA.\n- Then the user tells the assistant to check its tools.\n- Finally, the user asks what isn\'t working.\n\nThe key points here are checking tools and inquiring about what\'s not functioning. So, a fitting title would be something like "Проверь свои инструменты" which means "Check your tools."\n\nI need to make sure it\'s concise, between 3 to 7 words, and accurately reflects the dialogue\'s content.\n</think>\n\n<title>Проверь свои инструменты</title>'}, 'done_reason': 'stop', 'done': True, 'total_duration': 3609923200, 'load_duration': 16991000, 'prompt_eval_count': 309, 'prompt_eval_duration': 61827600, 'eval_count': 180, 'eval_duration': 3530582600}
+2025-06-12 17:36:34,353 - WARNING - generate_title: Raw content from model: '<think>
+Alright, let's break this down. The user wants a very short title for the dialogue they provided. The conversation is in Russian, so the title should also be in Russian.
+
+Looking at the dialogue:
+- User says "privet" (hello).
+- Assistant responds and asks how to help.
+- User says their name is SANYA.
+- Then the user tells the assistant to check its tools.
+- Finally, the user asks what isn't working.
+
+The key points here are checking tools and inquiring about what's not functioning. So, a fitting title would be something like "Проверь свои инструменты" which means "Check your tools."
+
+I need to make sure it's concise, between 3 to 7 words, and accurately reflects the dialogue's content.
+</think>
+
+<title>Проверь свои инструменты</title>'
+2025-06-12 17:36:34,355 - WARNING - generate_title: Content after ALL think/thought tags removal: '<title>Проверь свои инструменты</title>'
+2025-06-12 17:36:34,355 - WARNING - generate_title: Title extracted from <title> tags (after pre-cleaning thoughts): 'Проверь свои инструменты'
+2025-06-12 17:36:34,356 - WARNING - generate_title: Title after final quote/period removal: 'Проверь свои инструменты'
+2025-06-12 17:36:34,357 - WARNING - generate_title: Final processed title for API response: 'Проверь свои инструменты'
+2025-06-17 15:42:17,720 - WARNING - generate_title: Dialog context for title: User: ты тут
+---
+Assistant: <think>
+Alright, the user just asked "ты тут" which means "are you here" in Russian. I should respond in a friendly and approachable way.
+
+I want to m...
+---
+User: тебе нравятся цветы
+---
+Assistant: <think>
+Alright, let's see what we're dealing with here. The user started by saying "ты тут", which is Russian for "are you there?" So, first off, I n...
+---
+User: мои любимые цветы это кровавые розы
+---
+Assistant: <think>
+Alright, so I need to understand why the user said "мои любимые цветы это кровавые розы," which translates to "my favorite flowers are blood r...
+---
+User: не понял что ты сказал повтори на русском
+2025-06-17 15:42:17,720 - WARNING - generate_title: Final prompt for title (single message to LLM): Проанализируй следующий диалог:
+---
+User: ты тут
+---
+Assistant: <think>
+Alright, the user just asked "ты тут" which means "are you here" in Russian. I should respond in a friendly and approachable way.
+
+I want to m...
+---
+User: тебе нравятся цветы
+---
+Assistant: <think>
+Alright, let's see what we're dealing with here. The user started by saying "ты тут", which is Russian for "are you there?" So, first off, I n...
+---
+User: мои любимые цветы это кровавые розы
+---
+Assistant: <think>
+Alright, so I need to understand why the user said "мои любимые цветы это кровавые розы," which translates to "my favorite flowers are blood r...
+---
+User: не понял что ты сказал повтори на русском
+---
+Твоя задача: придумать ОЧЕНЬ краткий заголовок (от 3 до 7 слов) для этого диалога.
+Заголовок должен быть на том же языке, на котором велся диалог.
+Пожалуйста, помести заголовок ВНУТРИ тегов <title> и </title>.
+Пример: <title>Пример заголовка здесь</title>
+Не добавляй никаких своих мыслей, объяснений или комментариев вне тегов <title>. Твой ответ должен содержать ТОЛЬКО теги <title> и заголовок внутри них.
+2025-06-17 15:42:17,721 - WARNING - generate_title: Sending payload to Ollama: {
+  "model": "deepseek-r1:14b",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Проанализируй следующий диалог:\n---\nUser: ты тут\n---\nAssistant: <think>\nAlright, the user just asked \"ты тут\" which means \"are you here\" in Russian. I should respond in a friendly and approachable way.\n\nI want to m...\n---\nUser: тебе нравятся цветы\n---\nAssistant: <think>\nAlright, let's see what we're dealing with here. The user started by saying \"ты тут\", which is Russian for \"are you there?\" So, first off, I n...\n---\nUser: мои любимые цветы это кровавые розы\n---\nAssistant: <think>\nAlright, so I need to understand why the user said \"мои любимые цветы это кровавые розы,\" which translates to \"my favorite flowers are blood r...\n---\nUser: не понял что ты сказал повтори на русском\n---\nТвоя задача: придумать ОЧЕНЬ краткий заголовок (от 3 до 7 слов) для этого диалога.\nЗаголовок должен быть на том же языке, на котором велся диалог.\nПожалуйста, помести заголовок ВНУТРИ тегов <title> и </title>.\nПример: <title>Пример заголовка здесь</title>\nНе добавляй никаких своих мыслей, объяснений или комментариев вне тегов <title>. Твой ответ должен содержать ТОЛЬКО теги <title> и заголовок внутри них."
+    }
+  ],
+  "stream": false,
+  "options": {
+    "temperature": 0.4
+  }
+}
+2025-06-17 15:42:27,420 - WARNING - generate_title: Received response from Ollama: {'model': 'deepseek-r1:14b', 'created_at': '2025-06-17T09:42:27.4193768Z', 'message': {'role': 'assistant', 'content': '<think>\nAlright, let\'s break this down step by step. The user has provided a dialogue in Russian and wants me to create a very short title (3-7 words) for it. The title needs to be in the same language as the dialogue, which is Russian.\n\nFirst, I\'ll look at the dialogue:\n\n1. User: "ты тут" – meaning "are you here?"\n2. Assistant: Responded with something, but it\'s cut off.\n3. User then says: "тебе нравятся цветы" – "Do you like flowers?"\n4. Assistant responds again, but only partially shown.\n5. User continues: "мои любимые цветы это кровавые розы" – "My favorite flowers are blood roses."\n6. Assistant\'s response is cut off.\n7. Finally, the user says: "не понял что ты сказал повтори на русском" – "I didn\'t understand what you said, repeat in Russian."\n\nSo, the main points of the dialogue seem to be about communication issues and preferences for flowers, specifically blood roses.\n\nNow, I need a concise title that captures the essence of this conversation. It should reflect both the attempt at communication (the user asking if the assistant is there) and the mention of blood roses.\n\nPossible options could include:\n\n- "Кровавые розы и общение"\n- "Попытка разговора о цветах"\n- "Обсуждение предпочтений в цветах"\n\nBut I need to keep it between 3 to 7 words. The first option is the shortest and most direct, focusing on both the flowers and the interaction.\n\nSo, the title would be: <title>Кровавые розы и общение</title>\n</think>\n\n<title>Обсуждение цветов и языка</title>'}, 'done_reason': 'stop', 'done': True, 'total_duration': 7661242600, 'load_duration': 17495000, 'prompt_eval_count': 344, 'prompt_eval_duration': 61773600, 'eval_count': 387, 'eval_duration': 7580460100}
+2025-06-17 15:42:27,421 - WARNING - generate_title: Raw content from model: '<think>
+Alright, let's break this down step by step. The user has provided a dialogue in Russian and wants me to create a very short title (3-7 words) for it. The title needs to be in the same language as the dialogue, which is Russian.
+
+First, I'll look at the dialogue:
+
+1. User: "ты тут" – meaning "are you here?"
+2. Assistant: Responded with something, but it's cut off.
+3. User then says: "тебе нравятся цветы" – "Do you like flowers?"
+4. Assistant responds again, but only partially shown.
+5. User continues: "мои любимые цветы это кровавые розы" – "My favorite flowers are blood roses."
+6. Assistant's response is cut off.
+7. Finally, the user says: "не понял что ты сказал повтори на русском" – "I didn't understand what you said, repeat in Russian."
+
+So, the main points of the dialogue seem to be about communication issues and preferences for flowers, specifically blood roses.
+
+Now, I need a concise title that captures the essence of this conversation. It should reflect both the attempt at communication (the user asking if the assistant is there) and the mention of blood roses.
+
+Possible options could include:
+
+- "Кровавые розы и общение"
+- "Попытка разговора о цветах"
+- "Обсуждение предпочтений в цветах"
+
+But I need to keep it between 3 to 7 words. The first option is the shortest and most direct, focusing on both the flowers and the interaction.
+
+So, the title would be: <title>Кровавые розы и общение</title>
+</think>
+
+<title>Обсуждение цветов и языка</title>'
+2025-06-17 15:42:27,422 - WARNING - generate_title: Content after ALL think/thought tags removal: '<title>Обсуждение цветов и языка</title>'
+2025-06-17 15:42:27,422 - WARNING - generate_title: Title extracted from <title> tags (after pre-cleaning thoughts): 'Обсуждение цветов и языка'
+2025-06-17 15:42:27,423 - WARNING - generate_title: Title after final quote/period removal: 'Обсуждение цветов и языка'
+2025-06-17 15:42:27,423 - WARNING - generate_title: Final processed title for API response: 'Обсуждение цветов и языка'

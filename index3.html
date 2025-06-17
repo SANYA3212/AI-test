@@ -2319,8 +2319,13 @@ async function sendMessage() {
 
         try {
             const modelForTitle = (chat.modelhs && chat.modelhs.length > 0) ? chat.modelhs[chat.modelhs.length - 1] : currentModel;
-            // Вызываем функцию из titleHandler.js и ЖДЕМ ее выполнения
-            const generatedTitle = await fetchGeneratedTitle(chat.history, modelForTitle); 
+            
+            // Фильтруем историю для генерации заголовка, оставляя только user и assistant сообщения
+            const historyForTitleGeneration = chat.history.filter(m => m.role === 'user' || m.role === 'assistant');
+            console.log('[sendMessage] Filtered history for title generation:', historyForTitleGeneration);
+
+            // Вызываем функцию из titleHandler.js и ЖДЕМ ее выполнения, передавая отфильтрованную историю
+            const generatedTitle = await fetchGeneratedTitle(historyForTitleGeneration, modelForTitle); 
 
             if (generatedTitle) {
                 chat.chatnamess = generatedTitle;
@@ -2423,14 +2428,12 @@ async function sendMessage() {
 - list_drives: Просмотр всех дисков.
   Параметры: нет.
   Пример: [TOOL_CALL] list_drives({})
-- create_file: Создание/перезапись файла с содержимым.
+- write_file: Создание или перезапись файла с указанным содержимым.
   Параметры: {"filename": "полный_путь_к_файлу", "content": "содержимое"}
-  Пример: [TOOL_CALL] create_file({"filename": "C:\\temp\\new.txt", "content": "Hello!"})
+  Пример: [TOOL_CALL] write_file({"filename": "C:\\data\\new_document.txt", "content": "Это содержимое документа."})
 - read_file: Чтение текстового файла.
   Параметры: {"filename": "полный_путь_к_файлу"}
   Пример: [TOOL_CALL] read_file({"filename": "C:\\boot.ini"})
-- edit_file: Редактирование существующего файла (старое содержимое заменяется новым).
-  Параметры: {"filename": "полный_путь_к_файлу", "content": "новое_содержимое"}
 - create_directory: Создание новой папки.
   Параметры: {"dirname": "полный_путь_к_папке"}
   Пример: [TOOL_CALL] create_directory({"dirname": "C:\\NewFolder"})
@@ -2463,7 +2466,7 @@ async function sendMessage() {
   Параметры: нет.
 - manage_services: Управление службами (Windows/Linux).
   Параметры: {"action": "list"|"start"|"stop"|"restart"|"status", "service_name": "имя_службы"}
-  Пример: [TOOL_CALL] manage_services({"action": "status", "service_name": " наиболееwuauserv"})
+  Пример: [TOOL_CALL] manage_services({"action": "status", "service_name": "spooler"})
 - find_executable: Поиск исполняемого файла в системных путях.
   Параметры: {"executable_name": "имя_файла.exe"}
   Пример: [TOOL_CALL] find_executable({"executable_name": "python.exe"})

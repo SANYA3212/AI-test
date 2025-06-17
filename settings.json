@@ -1,14 +1,15 @@
 {
-  "language": "ru",
-  "default_model": "",
+  "language": "en",
+  "default_model": "deepseek-r1:14b",
   "background": {
-    "type": "gradient",
+    "type": "none",
     "image": null,
     "gradient": {
-      "color1": "#000000",
-      "color2": "#770707"
+      "color1": "#4166d5",
+      "color2": "#1e1f25"
     }
   },
   "automatic_tools": true,
-  "external_api_key": "sk-15a023b79f68454d93daba7e155d6184"
+  "external_api_key": "sk-15a023b79f68454d93daba7e155d6184",
+  "model_temperature": 2.0
 }
