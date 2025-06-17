@@ -14,6 +14,7 @@
       --main-bg: #1a1a1a;
       --message-user: #4166d5;  /* Цвет сообщений пользователя */
       --message-assistant: #4d4d4d;  /* Цвет сообщений ассистента */
+      --message-user-text: white;
       --text-primary: #e0e0e0;
       --text-secondary: #a0a0a0;
       --border-color: #333;
@@ -27,6 +28,7 @@
       --main-bg: #ffffff;
       --message-user: #e6f2ff;
       --message-assistant: #f0f4f8;
+      --message-user-text: #000000;
       --text-primary: #1a1a1a;
       --text-secondary: #666;
       --border-color: #ddd;
@@ -350,13 +352,13 @@
       align-self: flex-end;
       background-color: var(--message-user);
       border: 1px solid var(--border-color);
-      color: white;
+      color: var(--message-user-text);
     }
 
     .user-message .role,
     .user-message .chat-text,
     .user-message .message-buttons button {
-      color: white;
+      color: var(--message-user-text);
     }
 
     .message-buttons {
