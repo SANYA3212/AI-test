@@ -553,23 +553,36 @@
 
     .input-area button {
       border: none;
-      border-radius: 25px;
+      border-radius: 50%;
       background-color: var(--primary);
       color: #fff;
       cursor: pointer;
       font-size: 14px;
-      width: 50px;
-      height: 50px;
-      display: flex;
+      /* width: 50px; Removed */
+      /* height: 50px; Removed */
+      display: inline-flex; /* Changed from flex to allow content wrapping */
       align-items: center;
       justify-content: center;
       box-shadow: 0 4px 8px rgba(0,0,0,0.1);
       transition: var(--transition);
+      padding: 3px; /* Changed padding around the image */
+      box-sizing: border-box; 
     }
 
     .input-area button:hover {
       background-color: var(--primary-hover);
       transform: scale(1.05);
+    }
+
+    #sendBtn,
+    #stopBtn {
+      background-color: transparent;
+      border: none; /* Removed border */
+    }
+
+    #sendBtn:hover,
+    #stopBtn:hover {
+      background-color: rgba(255, 255, 255, 0.1); /* Match #imageUploadBtn hover background, no rotation */
     }
 
     /* Tools button styles */
@@ -578,6 +591,11 @@
       position: relative;
       border: 1px solid var(--border-color);
       transition: all 0.3s ease;
+      border-radius: 50%; /* Ensure circular */
+      /* width and height are effectively removed due to base class change */
+      padding: 3px; /* Consistent padding */
+      display: inline-flex; /* Ensure it wraps content */
+      box-sizing: border-box; /* Ensure padding/border don't alter fixed dimensions */
     }
 
     #toolsBtn:hover {
@@ -607,13 +625,23 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      border-radius: 25px;
+      border-radius: 50%;
       transition: var(--transition);
+      padding: 3px; /* Consistent padding */
+      display: inline-flex; /* Ensure it wraps content */
+      /* box-sizing: border-box; is inherited */
     }
 
     #imageUploadBtn:hover {
       background-color: rgba(255,255,255,0.1);
       transform: rotate(10deg);
+    }
+
+    .input-area button img,
+    #imageUploadBtn img,
+    #toolsBtn img {
+      display: block; /* Helps prevent extra space if parent is inline-flex */
+      /* Removed max-width, max-height, object-fit. Size will be from inline style on <img> */
     }
 
     /* Модальные окна */
@@ -1089,6 +1117,8 @@
   }
 }
   </style>
+  <link rel="stylesheet" id="highlight-light-theme" href="js/highlightjs/default-light.min.css" media="all" disabled>
+  <link rel="stylesheet" id="highlight-dark-theme" href="js/highlightjs/default-dark.min.css" media="all" disabled>
   
   <!-- MathJax Configuration -->
   <script>
@@ -1157,18 +1187,18 @@
       <div id="attachmentsContainer"></div>
       <div class="input-area">
         <button id="imageUploadBtn" title="Attach file">
-          <img src="icon/free-icon-attach-file-1389004.png" alt="Attach file" style="width:30px;height:30px;">
+          <img src="icon/attach-file.png" alt="Attach file" style="width:65px;height:65px;">
         </button>
         <button id="toolsBtn" title="Toggle Tools">
-          <img src="icon/tools.png" alt="Tools" style="width:24px;height:24px;">
+          <img src="icon/tools.png" alt="Tools" style="width:43px;height:43px;">
         </button>
         <input type="file" id="fileInput" multiple style="display: none;">
         <textarea id="chatInput" placeholder="Enter message..."></textarea>
         <button id="sendBtn" class="send-btn">
-          <img src="icon/send.png" alt="Send" style="width:24px;height:24px;">
+          <img src="icon/send.png" alt="Send" style="width:50px;height:50px;">
         </button>
         <button id="stopBtn" style="display:none;">
-          <img src="icon/stop.png" alt="Stop" style="width:24px;height:24px;">
+          <img src="icon/stop.png" alt="Stop" style="width:50px;height:50px;">
         </button>
       </div>
     </div>
@@ -1245,6 +1275,8 @@
     </div>
   </div>
   
+  <script src="js/highlightjs/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
   <script>
     var markdown = window.markdownit({
       html: false,
@@ -1268,6 +1300,25 @@
     let currentInstallingModelName = null;
     let globalInstallPercent = 0;
     let isGeneratingTitle = false;
+
+    // --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
+    function applyHighlightTheme(theme) {
+      const lightThemeLink = document.getElementById('highlight-light-theme');
+      const darkThemeLink = document.getElementById('highlight-dark-theme');
+
+      if (!lightThemeLink || !darkThemeLink) {
+        console.error('Highlight.js theme link elements not found!');
+        return;
+      }
+
+      if (theme === 'light') {
+        lightThemeLink.removeAttribute('disabled');
+        darkThemeLink.setAttribute('disabled', 'disabled');
+      } else { // Default to dark theme
+        darkThemeLink.removeAttribute('disabled');
+        lightThemeLink.setAttribute('disabled', 'disabled');
+      }
+    }
 
     // --- ЭЛЕМЕНТЫ СТРАНИЦЫ ---
     const newChatBtn = document.getElementById("newChat");
@@ -1730,6 +1781,11 @@
       } else if (chatContent.innerText.includes('$')) { // Простое условие, чтобы не логировать постоянно
          console.warn('MathJax or typesetPromise not available on window, but $ symbols detected.');
       }
+
+    // Add this for highlight.js
+    if (window.hljs) {
+      hljs.highlightAll();
+    }
       
       updateInputPosition();
     }
@@ -1920,7 +1976,8 @@
         
         const savedTheme = localStorage.getItem('theme') || 'dark';
         document.body.setAttribute('data-theme', savedTheme);
-        currentTheme = savedTheme;
+        currentTheme = savedTheme; // Ensure currentTheme is updated
+        applyHighlightTheme(currentTheme);
         
         // Загрузка фона из настроек
         if (settingsData.background) {
@@ -2779,7 +2836,8 @@ async function sendMessage() {
         const theme = option.getAttribute('data-theme');
         document.body.setAttribute('data-theme', theme);
         localStorage.setItem('theme', theme);
-        currentTheme = theme;
+        currentTheme = theme; // Ensure currentTheme is updated
+        applyHighlightTheme(currentTheme);
         
         document.querySelectorAll('.theme-option').forEach(opt => {
           opt.classList.remove('active');
